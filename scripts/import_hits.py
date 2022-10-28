@@ -8,7 +8,7 @@ from ROOT import gROOT, TFile, TH1D, TLorentzVector, TCanvas, TTree, gDirectory,
 def main(argv):
     gROOT.SetBatch(True)
 
-    nvar = 6 #number of stored variables for each hit (includes event, volume, layer and module number)
+    nvar = 10 #number of stored variables for each hit (includes event, volume, layer and module number)
 
     indir = "/global/cfs/cdirs/atlas/jmw464/mlkf_data/data/ttbar/ttbar_mu300/"
     outdir = "/global/homes/j/jmw464/ATLAS/KalmanML/data/"
@@ -33,7 +33,11 @@ def main(argv):
             layer_data[ientry,1] = meas_entry.volume_id
             layer_data[ientry,2] = meas_entry.layer_id
             layer_data[ientry,3] = meas_entry.surface_id
-            layer_data[ientry,4] = meas_entry.true_x
+            layer_data[ientry,4] = meas_entry.rec_loc0
+            layer_data[ientry,5] = meas_entry.rec_loc1
+            layer_data[ientry,6] = meas_entry.true_x
+            layer_data[ientry,7] = meas_entry.true_y
+            layer_data[ientry,8] = meas_entry.true_z
 
         data = np.append(data,layer_data,axis=0)
 
@@ -45,19 +49,20 @@ def main(argv):
 
     #add on truth particle information from hits file - these are sorted by event, volume, layer and module
     for ientry, hit_entry in enumerate(hits_tree):
-        data[ientry,5] = hit_entry.particle_id
+        data[ientry,-1] = hit_entry.particle_id
 
     #write hdf5 file
     for i in range(data.shape[0]):
         event_id = int(data[i,0])
         volume_id = int(data[i,1])
         layer_id = int(data[i,2])
+        module_id = int(data[i,3])
 
-        groupname = str(event_id)+"/"+str(volume_id)+"/"+str(layer_id) #group structure is event/volume/layer
+        groupname = str(event_id)+"/"+str(volume_id)+"/"+str(layer_id)+"/"+str(module_id) #group structure is event/volume/layer/module
         if groupname not in outfile.keys():
             group = outfile.create_group(groupname)
-            data_slice = data[np.logical_and(data[:,0]==event_id,np.logical_and(data[:,1]==volume_id,data[:,2]==layer_id))] #slice data corresponding to event, volume and layer
-            group.create_dataset("hits",data=data_slice[:,3:]) #remove event, volume and layer information from array
+            data_slice = data[np.logical_and.reduce((data[:,0]==event_id,data[:,1]==volume_id,data[:,2]==layer_id,data[:,3]==module_id))] #slice data corresponding to event, volume, layer and module
+            group.create_dataset("hits",data=data_slice[:,4:]) #remove event, volume and layer information from array
 
     outfile.close()
 
