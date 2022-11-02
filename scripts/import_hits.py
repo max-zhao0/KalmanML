@@ -2,42 +2,46 @@
 
 import os,sys,math,glob,ROOT,h5py
 import numpy as np
+import awkward as ak
 from ROOT import gROOT, TFile, TH1D, TLorentzVector, TCanvas, TTree, gDirectory, TChain, TH2D
+import uproot
 
 
 def main(argv):
     gROOT.SetBatch(True)
 
-    nvar = 10 #number of stored variables for each hit (includes event, volume, layer and module number)
+    nvar = 12 #number of stored variables for each hit (includes event, volume, layer and module number)
 
     indir = "/global/cfs/cdirs/atlas/jmw464/mlkf_data/data/ttbar/ttbar_mu300/"
     outdir = "/global/homes/j/jmw464/ATLAS/KalmanML/data/"
 
     hits_file = TFile(indir+"hits.root")
     hits_tree = hits_file.Get("hits")
-    measurements_file = TFile(indir+"measurements.root")
+    measurements_file = uproot.open(indir+"measurements.root")
 
     outfile = h5py.File(outdir+"hits.hdf5","w")
-  
+
     data = np.zeros((0,nvar))
-    keylist = [key.GetName() for key in measurements_file.GetListOfKeys()]
+    keylist = measurements_file.keys()
 
     #read each folder in measurements file (corresponding to volume, layer and modules number)
     for key in keylist:
         vol = key.split("_")[0]
-        layer_tree = measurements_file.Get(key)
-
-        layer_data = np.zeros((layer_tree.GetEntries(),nvar))
-        for ientry, meas_entry in enumerate(layer_tree):
-            layer_data[ientry,0] = meas_entry.event_nr
-            layer_data[ientry,1] = meas_entry.volume_id
-            layer_data[ientry,2] = meas_entry.layer_id
-            layer_data[ientry,3] = meas_entry.surface_id
-            layer_data[ientry,4] = meas_entry.rec_loc0
-            layer_data[ientry,5] = meas_entry.rec_loc1
-            layer_data[ientry,6] = meas_entry.true_x
-            layer_data[ientry,7] = meas_entry.true_y
-            layer_data[ientry,8] = meas_entry.true_z
+        layer_tree = measurements_file[key]
+        
+        layer_data = np.zeros((layer_tree.num_entries,nvar))
+        
+        layer_data[:,0] = layer_tree["event_nr"].array(library="np")
+        layer_data[:,1] = layer_tree["volume_id"].array(library="np")
+        layer_data[:,2] = layer_tree["layer_id"].array(library="np")
+        layer_data[:,3] = layer_tree["surface_id"].array(library="np")
+        layer_data[:,4] = layer_tree["rec_loc0"].array(library="np")
+        layer_data[:,5] = layer_tree["rec_loc1"].array(library="np")
+        layer_data[:,6] = ak.sum(layer_tree["channel_value"].array(library="ak"),axis=1)
+        layer_data[:,7] = layer_tree["clus_size"].array(library="np")
+        layer_data[:,8] = layer_tree["true_x"].array(library="np")
+        layer_data[:,9] = layer_tree["true_y"].array(library="np")
+        layer_data[:,10] = layer_tree["true_z"].array(library="np")
 
         data = np.append(data,layer_data,axis=0)
 
