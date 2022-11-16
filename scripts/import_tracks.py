@@ -45,8 +45,8 @@ def main(argv):
     outfile = h5py.File(outdir+"tracks.hdf5","w")
  
     nentries = tracks_tree.GetEntries()
-    track_meas = np.zeros((nentries,maxhits,3))
-    track_truth = np.zeros((nentries,maxhits,4))
+    track_meas = np.zeros((nentries,maxhits,7))
+    track_truth = np.zeros((nentries,maxhits,5))
 
     for ientry, track_entry in enumerate(tracks_tree):
         nhits = track_entry.nMeasurements
@@ -62,25 +62,35 @@ def main(argv):
                 true_y = track_entry.t_y[i]
                 true_z = track_entry.t_z[i]
 
-                hitmatch = np.logical_and(np.logical_and(rel_hits[:,2] == true_x, rel_hits[:,3] == true_y), rel_hits[:,4] == true_z)
+                hitmatch = np.logical_and(np.logical_and(rel_hits[:,4] == true_x, rel_hits[:,5] == true_y), rel_hits[:,6] == true_z)
                 hitindex = np.where(hitmatch)[0][0]
 
-                track_truth[ientry,nhits-i-1] = [rel_hits[hitindex,-1], true_x, true_y, true_z]
-                track_meas[ientry,nhits-i-1] = [volume_id, layer_id, module_id]
+                track_truth[ientry,nhits-i-1] = [0, rel_hits[hitindex,-1], true_x, true_y, true_z]
+                track_meas[ientry,nhits-i-1] = [volume_id, layer_id, module_id, rel_hits[hitindex,4], rel_hits[hitindex,5], rel_hits[hitindex,6], rel_hits[hitindex,7]]
 
+            track_truth[ientry,:,0] = np.logical_and(track_truth[ientry,:,1] == track_truth[ientry,0,1], track_truth[ientry,:,1] > 0)
+            
             #calculate percentage of hits in track that are from same particle as seed
-            track_candidate = track_truth[ientry,:,0][track_truth[ientry,:,0] > 0]
+            track_candidate = track_truth[ientry,:,1][track_truth[ientry,:,1] > 0]
             percent_from_seed_particle = track_candidate[track_candidate == track_candidate[0]].shape[0]/track_candidate.shape[0]
 
-    track_meas = track_meas[track_truth[:,0,0] > 0]
-    track_truth = track_truth[track_truth[:,0,0] > 0]
+    track_meas = track_meas[track_truth[:,0,1] > 0]
+    track_truth = track_truth[track_truth[:,0,1] > 0]
     track_truth, unique_indices = np.unique(track_truth,return_index=True,axis=0)    
     track_meas = track_meas[unique_indices]
 
+    shuffle_array = np.random.permutation(track_truth.shape[0])
+    track_truth = track_truth[shuffle_array]
+    track_meas = track_meas[shuffle_array]
+
     #calculate what percent tracks are from unique seeds
-    percent_from_unique_seed = np.unique(track_truth[:,0,0]).shape[0]/track_truth.shape[0]
+    percent_from_unique_seed = np.unique(track_truth[:,0,1]).shape[0]/track_truth.shape[0]
 
     plot_candidates(track_truth,"xy",10000)
+
+    group = outfile.create_group("tracks")
+    group.create_dataset("measurements",data=track_meas)
+    group.create_dataset("truth",data=track_truth)
 
     hits_file.close()
     outfile.close()
