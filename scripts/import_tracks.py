@@ -35,8 +35,8 @@ def main(argv):
     maxhits = 25
     minhits = 3
 
-    indir = "/global/cfs/cdirs/atlas/jmw464/mlkf_data/data/ttbar/ttbar_mu300/"
-    outdir = "/global/homes/j/jmw464/ATLAS/KalmanML/data/"
+    indir = "/global/cfs/cdirs/atlas/jmw464/mlkf_data/shell/ttbar200_50/"
+    outdir = indir+"processed/"
 
     tracks_file = TFile(indir+"trackstates_ckf.root")
     tracks_tree = tracks_file.Get("trackstates")
@@ -48,6 +48,7 @@ def main(argv):
     track_meas = np.zeros((nentries,maxhits,7))
     track_truth = np.zeros((nentries,maxhits,5))
 
+    bad_tracks = [] #index of tracks to remove from final sample
     for ientry, track_entry in enumerate(tracks_tree):
         nhits = track_entry.nMeasurements
         event_id = track_entry.event_nr
@@ -56,23 +57,35 @@ def main(argv):
                 volume_id = track_entry.volume_id[i]
                 layer_id = track_entry.layer_id[i]
                 module_id = track_entry.module_id[i]
-                
-                rel_hits = hits_file[str(event_id)+"/"+str(volume_id)+"/"+str(layer_id)+"/"+str(module_id)]["hits"]
+
+                rel_hits = hits_file[str(event_id)+"/"+str(volume_id)]["hits"]
                 true_x = track_entry.t_x[i]
                 true_y = track_entry.t_y[i]
                 true_z = track_entry.t_z[i]
 
-                hitmatch = np.logical_and(np.logical_and(rel_hits[:,4] == true_x, rel_hits[:,5] == true_y), rel_hits[:,6] == true_z)
-                hitindex = np.where(hitmatch)[0][0]
+                hitmatch = np.logical_and.reduce((rel_hits[:,0] == layer_id, rel_hits[:,1] == module_id, np.abs(rel_hits[:,6] - true_x) < 10e-4, np.abs(rel_hits[:,7] - true_y) < 10e-4, np.abs(rel_hits[:,8] - true_z) < 10e-4))
 
-                track_truth[ientry,nhits-i-1] = [0, rel_hits[hitindex,-1], true_x, true_y, true_z]
-                track_meas[ientry,nhits-i-1] = [volume_id, layer_id, module_id, rel_hits[hitindex,4], rel_hits[hitindex,5], rel_hits[hitindex,6], rel_hits[hitindex,7]]
+                #check if hit match was found, if not add to bad tracks
+                if np.where(hitmatch)[0].size == 0:
+                    bad_tracks.append(ientry)
+                    break
+                else:
+                    hitindex = np.where(hitmatch)[0][0]
+                    track_truth[ientry,nhits-i-1] = [0, rel_hits[hitindex,-1], true_x, true_y, true_z]
+                    track_meas[ientry,nhits-i-1] = [volume_id, layer_id, module_id, rel_hits[hitindex,2], rel_hits[hitindex,3], rel_hits[hitindex,4], rel_hits[hitindex,5]]
 
-            track_truth[ientry,:,0] = np.logical_and(track_truth[ientry,:,1] == track_truth[ientry,0,1], track_truth[ientry,:,1] > 0)
-            
-            #calculate percentage of hits in track that are from same particle as seed
-            track_candidate = track_truth[ientry,:,1][track_truth[ientry,:,1] > 0]
-            percent_from_seed_particle = track_candidate[track_candidate == track_candidate[0]].shape[0]/track_candidate.shape[0]
+            if ientry not in bad_tracks:
+                track_truth[ientry,:,0] = np.logical_and(track_truth[ientry,:,1] == track_truth[ientry,0,1], track_truth[ientry,:,1] > 0) #calculate NN labels by checking which hits are from same particle as seed
+                track_candidate = track_truth[ientry,:,1][track_truth[ientry,:,1] > 0] #isolate track candidate (useful for plotting)
+                percent_from_seed_particle = track_candidate[track_candidate == track_candidate[0]].shape[0]/track_candidate.shape[0] #calculate percentage of hits in track that are from same particle as seed
+
+            sys.stdout.write("\rProcessed {} out of {} events".format(ientry+1, nentries))
+            sys.stdout.flush()
+
+    #remove bad tracks
+    track_meas = np.delete(track_meas, bad_tracks, axis=0)
+    track_truth = np.delete(track_truth, bad_tracks, axis=0)
+    print("\nRemoved {} bad tracks".format(len(bad_tracks)))
 
     track_meas = track_meas[track_truth[:,0,1] > 0]
     track_truth = track_truth[track_truth[:,0,1] > 0]

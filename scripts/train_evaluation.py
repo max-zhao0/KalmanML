@@ -23,8 +23,10 @@ def main(argv):
     batch_size = 15
     train_prop = 0.8
     val_prop = 0.1
+    max_len = 25
+    class_threshold = 0.5
 
-    indir = "/global/homes/j/jmw464/ATLAS/KalmanML/data/"
+    indir = "/global/cfs/cdirs/atlas/jmw464/mlkf_data/data/processed/"
     outdir = "/global/homes/j/jmw464/ATLAS/KalmanML/data/"
 
     #---------------------------- IMPORT DATA ----------------------------
@@ -55,7 +57,7 @@ def main(argv):
     else:
         device = th.device('cpu')
 
-    model = EvalNN(7,10,2,10,False,0.1,25).double().to(device)
+    model = EvalNN(7,10,2,10,False,0.1,max_len).double().to(device)
     optimizer = th.optim.Adam(model.parameters(), lr=0.001)
     loss = nn.BCELoss()
 
@@ -68,6 +70,7 @@ def main(argv):
         print("Loading previous model. Starting from epoch {}.".format(start_epoch), flush=True)
     else:
         start_epoch = 1
+
 
     #print model parameters
     print("Model built. Parameters:", flush=True)
@@ -120,7 +123,9 @@ def main(argv):
 
     #---------------------------- EVALUATE NETWORK ----------------------------
 
-    test_loss = 0
+    ntest = ntracks-val_idx+1
+    test_loss = track_index = 0
+    test_results = np.zeros((ntest,max_len,2))
     with th.no_grad():
         model.eval()
         for ibatch, data in enumerate(test_loader):
@@ -128,15 +133,37 @@ def main(argv):
             pred = model(batch)
             pred_lt = loss(pred, test_labels)
             test_loss += pred_lt.item()
-            
-            print(test_labels.shape)
 
-    test_loss = test_loss/(ntracks-val_idx+1)
+            test_labels[batch[:,:,0] == 0] = -1 #mark empty hits as -1
+
+            test_results[track_index:track_index+batch.shape[0],:,:1] = pred
+            test_results[track_index:track_index+batch.shape[0],:,1:] = test_labels
+            track_index += batch.shape[0]
+
+    test_results[:,:,0] = test_results[:,:,0] > class_threshold #round predictions based on chosen threshold
+
+    test_loss = test_loss/ntest
     print("--------------------------------------------")
     print("--------------------------------------------")
     print("Test loss: {}".format(test_loss), flush=True)
 
+    eval_array = np.zeros((ntest, 2))
+    for itrack in range(ntest):
+        track_len = np.sum(test_results[itrack,:,1] != -1)
+        correct = np.sum(test_results[itrack,:,0] == test_results[itrack,:,1])
+        eval_array[itrack] = [track_len, correct]
+
+    #plot number of correct hits vs number of total hits
+    bin_edges = np.arange(-0.5,max_len+1.5,1)
+    fig1 = plt.figure()
+    plt.hist2d(eval_array[:,0], eval_array[:,1], bins=[bin_edges, bin_edges])
+    #plt.scatter(eval_array[:,0], eval_array[:,1])
+    plt.xlabel("Total hits")
+    plt.ylabel("Correct hits")
+    plt.savefig(outdir+str(runnumber)+"/correct_hits.png")
+
     #plot loss
+    fig2 = plt.figure()
     plt.ioff()
     plt.plot(range(nepochs), train_loss_array, label="Training")
     plt.plot(range(nepochs), val_loss_array, label="Validation")
