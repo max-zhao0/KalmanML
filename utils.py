@@ -1,8 +1,6 @@
 import numpy as np
 import h5py
 
-# Hello
-
 class HitLocator:
     # Volume ids in the detector
     volume_lst = np.array([7, 8, 9, 12, 13, 14, 16, 17, 18])
@@ -10,7 +8,10 @@ class HitLocator:
     barrel_set = {8, 13, 17}
     
     hit_map = {}
+    # Range of z for barrels, r for endcaps. Defined on volumes.
     t_range = {}
+    # r for barrels, z for endcaps. Defined on layers.
+    u_coord = {}
 
     def __init__(self, resolution, detector_path):
         """
@@ -40,6 +41,7 @@ class HitLocator:
                     cx_lay = cx_vol[lay_id_vol == layer]
                     cy_lay = cy_vol[lay_id_vol == layer]
                     diameter = 2 * np.sqrt(cx_lay[0]**2 + cy_lay[0]**2)
+                    self.u_coord[(volume, layer)] = diameter / 2
                     
                     z_dim = round(np.ceil((max_z - min_z) / resolution))
                     phi_dim = round(np.ceil(np.pi * diameter / resolution))
@@ -52,7 +54,12 @@ class HitLocator:
                 
                 r_dim = round(np.ceil((max_r - min_r) / resolution))
                 phi_dim = round(np.ceil(np.pi * (max_r + min_r) / resolution))
+                
                 for layer in set(lay_id_vol):
+                    cz_lay = cz_vol[lay_id_vol == layer]
+                    assert abs(min(cz_lay) - max(cz_lay)) < 12
+                    self.u_coord[(volume, layer)] = np.mean(cz_lay)
+
                     vol_map[layer] = np.empty((phi_dim, r_dim), dtype=list)
 
             for layer in set(lay_id_vol):
@@ -61,6 +68,16 @@ class HitLocator:
                         row[i] = []
 
             self.hit_map[volume] = vol_map
+
+    def get_detector_spec(self):
+        """
+        Gets detector info
+        ---
+        t_range     : dict      : indexed by volume, gives range of z/r depending on if barrel or endcap respectively
+        u_coord     : dict      : indexed by (volume, layer), gives coordinate that specifies layers position: r/z respectively for barrel and endcap.
+        --- 
+        """
+        return self.t_range.copy(), self.u_coord.copy()
 
     def load_hits(self, hits_path, event_id):
         """
@@ -100,7 +117,7 @@ class HitLocator:
 
     def get_near_hits(self, volume, layer, center, area):
         """
-        Get all hits near some point on a layer
+        Get all hits near some point on a layer using a range of coordinates.
         ---
         volume  : int               : volume that contains the layer
         layer   : int               : layer number
@@ -119,7 +136,7 @@ class HitLocator:
         get_t_coord = lambda t: round((lay_map.shape[1] - 1) * (t - lay_range[0]) / (lay_range[1] - lay_range[0]))
 
         start_phi = get_phi_coord(center[0] - area[0]) % lay_map.shape[0]
-        end_phi = get_phi_coord(center[0] + center[0]) % lay_map.shape[0]
+        end_phi = get_phi_coord(center[0] + area[0]) % lay_map.shape[0]
         start_t = max(get_t_coord(center[1] - area[1]), 0)
         end_t = min(get_t_coord(center[1] + area[1]), lay_map.shape[1] - 1)
 
@@ -131,6 +148,28 @@ class HitLocator:
                 phi_coord = (phi_coord + 1) % lay_map.shape[0]
 
         return hits
+
+    def get_hits_around(self, volume, layer, center, radius):
+        """
+        Gets all hits around a point defined by a charicteristic distance.
+        ```
+        volume  : int               : volume that contains the layer
+        layer   : int               : layer number
+        center  : (float, float)    : point around which to collect hits. Of the form (phi, t) where t = z if barrel volume and r if endcap
+        radius  : float             : radius around which to collect hits.
+        ```
+        Returns:
+        hits    : List              : list of hits
+        """
+        area = np.empty(2)
+        if volume in self.barrel_lst:
+            s = self.u_coord[(volume, layer)]
+            area[0] = radius / s
+        else:
+            area[0] = radius / center[1]
+        area[1] = radius
+
+        return self.get_near_hits(volume, layer, center, area)
  
 def solve_helix(p1, p2, p3, B):
     """
@@ -247,12 +286,13 @@ def helix_stepper(points, B, stepsize, start_index=None):
         t += delta_t
 
 if __name__ == "__main__":
-    pass
-#     detector_path = "/global/homes/m/max_zhao/mlkf/trackml/data/detectors.csv"
-#     hits_path = "/global/homes/m/max_zhao/mlkf/trackml/data/hits.hdf5" 
+     pass
+     #detector_path = "/global/homes/m/max_zhao/mlkf/trackml/data/detectors.csv"
+     #hits_path = "/global/homes/m/max_zhao/mlkf/trackml/data/hits.hdf5" 
 
-#     loc = HitLocator(10, detector_path)
-#     loc.load_hits(hits_path, 0)
-#     print("Finished initializing")
-#     hits = loc.get_near_hits(8, 8, (np.pi, 0), (np.pi / 7, 80))
-#     print(len(hits))
+     #loc = HitLocator(10, detector_path)
+     #loc.load_hits(hits_path, 0)
+     #print("Finished initializing")
+     #hits = loc.get_near_hits(8, 8, (np.pi, 0), (np.pi / 7, 80))
+     #t_range, u_coord = loc.get_detector_spec()
+     #print(u_coord)
