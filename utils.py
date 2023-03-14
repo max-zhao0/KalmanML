@@ -12,6 +12,8 @@ class HitLocator:
     t_range = {}
     # r for barrels, z for endcaps. Defined on layers.
     u_coord = {}
+    # list of layers for each volume
+    layer_dict = {}
 
     def __init__(self, resolution, detector_path):
         """
@@ -24,6 +26,8 @@ class HitLocator:
         volume_id, layer_id, module_id, cx, cy, cz, hv = np.loadtxt(detector_path, delimiter=",", skiprows=1, usecols=[0,1,2,3,4,5,18], unpack=True)
         
         for volume in self.volume_lst:
+            layer_dict[volume] = []
+            
             lay_id_vol = layer_id[volume_id == volume]
             cx_vol = cx[volume_id == volume]
             cy_vol = cy[volume_id == volume]
@@ -38,6 +42,8 @@ class HitLocator:
                 self.t_range[volume] = (min_z, max_z)
                 
                 for layer in set(lay_id_vol):
+                    layer_dict[volume].append(layer)
+                    
                     cx_lay = cx_vol[lay_id_vol == layer]
                     cy_lay = cy_vol[lay_id_vol == layer]
                     diameter = 2 * np.sqrt(cx_lay[0]**2 + cy_lay[0]**2)
@@ -56,6 +62,8 @@ class HitLocator:
                 phi_dim = round(np.ceil(np.pi * (max_r + min_r) / resolution))
                 
                 for layer in set(lay_id_vol):
+                    layer_dict[volume].append(layer)
+                    
                     cz_lay = cz_vol[lay_id_vol == layer]
                     assert abs(min(cz_lay) - max(cz_lay)) < 12
                     self.u_coord[(volume, layer)] = np.mean(cz_lay)
@@ -75,9 +83,9 @@ class HitLocator:
         ---
         t_range     : dict      : indexed by volume, gives range of z/r depending on if barrel or endcap respectively
         u_coord     : dict      : indexed by (volume, layer), gives coordinate that specifies layers position: r/z respectively for barrel and endcap.
-        --- 
+        layer_dict  : dict      : indexed by volume, gives list of layers in each volume.
         """
-        return self.t_range.copy(), self.u_coord.copy()
+        return self.t_range.copy(), self.u_coord.copy(), self.layer_dict.copy()
 
     def load_hits(self, hits_path, event_id):
         """
