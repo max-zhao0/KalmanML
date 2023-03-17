@@ -150,7 +150,7 @@ class HitLocator:
         area    : (float, float)    : range with which to collect hits. Essentially collect hits with coordinate in center +- area
         ---
         Returns:
-        hits    : List              : list of hits
+        hits    : array             : array of hits
         """
         assert area[0] > 0 and area[1] > 0
 
@@ -172,7 +172,7 @@ class HitLocator:
                 hits += lay_map[phi_coord, t_coord]
                 phi_coord = (phi_coord + 1) % lay_map.shape[0]
 
-        return hits
+        return np.array(hits)
 
     def get_hits_around(self, volume, layer, center, radius):
         """
