@@ -310,14 +310,6 @@ def helix_stepper(points, B, stepsize, start_index=None):
         yield Rot_inv @ helix(t)
         t += delta_t
 
-if __name__ == "__main__":
-     pass
-     #detector_path = "/global/homes/m/max_zhao/mlkf/trackml/data/detectors.csv"
-     #hits_path = "/global/homes/m/max_zhao/mlkf/trackml/data/hits.hdf5" 
-
-     #loc = HitLocator(10, detector_path)
-     #loc.load_hits(hits_path, 0)
-     #print("Finished initializing")
-     #hits = loc.get_near_hits(8, 8, (np.pi, 0), (np.pi / 7, 80))
-     #t_range, u_coord = loc.get_detector_spec()
-     #print(u_coord)
+class BFieldMap:         
+    def get(pos):
+        return np.array([0, 0, 2])
