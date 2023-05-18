@@ -6,12 +6,16 @@ class HitLocator:
     volume_lst = np.array([7, 8, 9, 12, 13, 14, 16, 17, 18])
     # Volumes that are barrel shaped
     barrel_set = {8, 13, 17}
-    
+
     hit_map = {}
     # Range of z for barrels, r for endcaps. Defined on volumes.
     t_range = {}
     # r for barrels, z for endcaps. Defined on layers.
     u_coord = {}
+    # list of layers for each volume
+    layer_dict = {}
+    # arrays of all hits on layer
+    full_layers = {}
 
     def __init__(self, resolution, detector_path):
         """
@@ -24,6 +28,8 @@ class HitLocator:
         volume_id, layer_id, module_id, cx, cy, cz, hv = np.loadtxt(detector_path, delimiter=",", skiprows=1, usecols=[0,1,2,3,4,5,18], unpack=True)
         
         for volume in self.volume_lst:
+            self.layer_dict[volume] = []
+            
             lay_id_vol = layer_id[volume_id == volume]
             cx_vol = cx[volume_id == volume]
             cy_vol = cy[volume_id == volume]
@@ -38,6 +44,8 @@ class HitLocator:
                 self.t_range[volume] = (min_z, max_z)
                 
                 for layer in set(lay_id_vol):
+                    self.layer_dict[volume].append(layer)
+                    
                     cx_lay = cx_vol[lay_id_vol == layer]
                     cy_lay = cy_vol[lay_id_vol == layer]
                     diameter = 2 * np.sqrt(cx_lay[0]**2 + cy_lay[0]**2)
@@ -56,6 +64,8 @@ class HitLocator:
                 phi_dim = round(np.ceil(np.pi * (max_r + min_r) / resolution))
                 
                 for layer in set(lay_id_vol):
+                    self.layer_dict[volume].append(layer)
+                    
                     cz_lay = cz_vol[lay_id_vol == layer]
                     assert abs(min(cz_lay) - max(cz_lay)) < 12
                     self.u_coord[(volume, layer)] = np.mean(cz_lay)
@@ -75,45 +85,60 @@ class HitLocator:
         ---
         t_range     : dict      : indexed by volume, gives range of z/r depending on if barrel or endcap respectively
         u_coord     : dict      : indexed by (volume, layer), gives coordinate that specifies layers position: r/z respectively for barrel and endcap.
-        --- 
+        layer_dict  : dict      : indexed by volume, gives list of layers in each volume.
         """
-        return self.t_range.copy(), self.u_coord.copy()
+        return self.t_range.copy(), self.u_coord.copy(), self.layer_dict.copy()
 
-    def load_hits(self, hits_path, event_id):
+    def load_hits(self, hits_path, event_id, layers_to_save={(8,2), (8,4), (7,14), (9,2)}):
         """
         Load hits into data structure from hits file
         ---
-        hits_path   : String    : path to hits file
-        event_id    : int       : event to store
+        hits_path       : String        : path to hits file
+        event_id        : int           : event to store
+        layers_to_save  : set (tuples)  : layers that should be stored in full arrays
         """
+        volumes_to_save = {vol for vol, lay in layers_to_save}
+
         event_id = str(event_id)
         f = h5py.File(hits_path, "r")
 
         for volume_id in f[event_id].keys():
-            for layer_id in f[event_id + "/" + volume_id].keys():
-                for module_id in f[event_id + "/" + volume_id + "/" + layer_id]:
-                    data = f[event_id + "/" + volume_id + "/" + layer_id + "/" + module_id]["hits"]
-                    volume = int(volume_id)
-                    layer = int(layer_id)
-                    lay_map = self.hit_map[volume][layer]
-                    vol_range = self.t_range[volume]
+            volume = int(volume_id)
+            vol_range = self.t_range[volume]
+            vol_hits = f[event_id + "/" + volume_id + "/hits"]
 
-                    # x, y, z = 4, 5, 6
-                    for hit in data:
-                        x, y, z = hit[4:7]
+            if volume in volumes_to_save:
+                for layer in self.layer_dict[volume]:
+                    if (volume, layer) in layers_to_save:
+                        self.full_layers[(volume, layer)] = vol_hits[vol_hits[:,0] == layer]
 
-                        raw_phi = np.arctan2(x, y)
-                        phi = raw_phi if raw_phi >= 0 else 2 * np.pi + raw_phi
-                        phi_coord = round((phi / (2 * np.pi)) * (lay_map.shape[0] - 1))
+            for hit in vol_hits:
+                layer = hit[0]
+                lay_map = self.hit_map[volume][layer]
+                x, y, z = hit[6:9]
 
-                        if volume in self.barrel_set:
-                            t_coord = round((lay_map.shape[1] - 1) * (z - vol_range[0]) / (vol_range[1] - vol_range[0]))
-                        else:
-                            r = np.sqrt(x**2 + y**2)
-                            t_coord = round((lay_map.shape[1] - 1) * (r - vol_range[0]) / (vol_range[1] - vol_range[0]))
-                        
-                        lay_map[phi_coord, t_coord].append(hit)
+                raw_phi = np.arctan2(y, x)
+                phi = raw_phi if raw_phi >= 0 else 2 * np.pi + raw_phi
+                phi_coord = round((phi / (2 * np.pi)) * (lay_map.shape[0] - 1))
+
+                if volume in self.barrel_set:
+                    t_coord = round((lay_map.shape[1] - 1) * (z - vol_range[0]) / (vol_range[1] - vol_range[0]))
+                else:
+                    r = np.sqrt(x**2 + y**2)
+                    t_coord = round((lay_map.shape[1] - 1) * (r - vol_range[0]) / (vol_range[1] - vol_range[0]))
+
+                lay_map[phi_coord, t_coord].append(hit)
+
         f.close()
+
+    def get_layer_hits(self, volume, layer):
+        """
+        Get all hits on a layer
+        ---
+        volume  : int
+        layer   : int
+        """
+        return self.full_layers[volume, layer]
 
     def get_near_hits(self, volume, layer, center, area):
         """
@@ -125,7 +150,7 @@ class HitLocator:
         area    : (float, float)    : range with which to collect hits. Essentially collect hits with coordinate in center +- area
         ---
         Returns:
-        hits    : List              : list of hits
+        hits    : array             : array of hits
         """
         assert area[0] > 0 and area[1] > 0
 
@@ -147,7 +172,7 @@ class HitLocator:
                 hits += lay_map[phi_coord, t_coord]
                 phi_coord = (phi_coord + 1) % lay_map.shape[0]
 
-        return hits
+        return np.array(hits)
 
     def get_hits_around(self, volume, layer, center, radius):
         """
@@ -285,14 +310,6 @@ def helix_stepper(points, B, stepsize, start_index=None):
         yield Rot_inv @ helix(t)
         t += delta_t
 
-if __name__ == "__main__":
-     pass
-     #detector_path = "/global/homes/m/max_zhao/mlkf/trackml/data/detectors.csv"
-     #hits_path = "/global/homes/m/max_zhao/mlkf/trackml/data/hits.hdf5" 
-
-     #loc = HitLocator(10, detector_path)
-     #loc.load_hits(hits_path, 0)
-     #print("Finished initializing")
-     #hits = loc.get_near_hits(8, 8, (np.pi, 0), (np.pi / 7, 80))
-     #t_range, u_coord = loc.get_detector_spec()
-     #print(u_coord)
+class BFieldMap:         
+    def get(pos):
+        return np.array([0, 0, 2])
