@@ -58,8 +58,17 @@ class HitLocator:
                 cr_vol = np.sqrt(cx_vol**2 + cy_vol**2)
                 min_r = min(cr_vol) - max_hv
                 max_r = max(cr_vol) + max_hv
-                self.t_range[volume] = (min_r, max_r)
                 
+                if volume == 16 or volume == 18:
+                    # Unfortunate hack
+                    max_r += 6
+                elif volume == 7 or volume == 9:
+                    max_r += 1
+                elif volume == 12 or volume == 14:
+                    max_r += 1
+
+                self.t_range[volume] = (min_r, max_r)
+
                 r_dim = round(np.ceil((max_r - min_r) / resolution))
                 phi_dim = round(np.ceil(np.pi * (max_r + min_r) / resolution))
                 
@@ -89,7 +98,7 @@ class HitLocator:
         """
         return self.t_range.copy(), self.u_coord.copy(), self.layer_dict.copy()
 
-    def load_hits(self, hits_path, event_id, layers_to_save={(8,2), (8,4), (7,14), (9,2)}):
+    def load_hits(self, hits_path, event_id, layers_to_save={(8,2), (8,4), (7,14), (9,2), (8,6), (7,12), (9,4)}):
         """
         Load hits into data structure from hits file
         ---
@@ -121,11 +130,10 @@ class HitLocator:
                 phi = raw_phi if raw_phi >= 0 else 2 * np.pi + raw_phi
                 phi_coord = round((phi / (2 * np.pi)) * (lay_map.shape[0] - 1))
 
-                if volume in self.barrel_set:
-                    t_coord = round((lay_map.shape[1] - 1) * (z - vol_range[0]) / (vol_range[1] - vol_range[0]))
-                else:
-                    r = np.sqrt(x**2 + y**2)
-                    t_coord = round((lay_map.shape[1] - 1) * (r - vol_range[0]) / (vol_range[1] - vol_range[0]))
+                t = z if volume in self.barrel_set else np.sqrt(x**2 + y**2)
+                
+                assert vol_range[0] <= t <= vol_range[1], str(t) + " Vol: " + str(volume) + " " + str(vol_range)
+                t_coord = round((lay_map.shape[1] - 1) * (t - vol_range[0]) / (vol_range[1] - vol_range[0]))
 
                 lay_map[phi_coord, t_coord].append(hit)
 
@@ -187,7 +195,7 @@ class HitLocator:
         hits    : List              : list of hits
         """
         area = np.empty(2)
-        if volume in self.barrel_lst:
+        if volume in self.barrel_set:
             s = self.u_coord[(volume, layer)]
             area[0] = radius / s
         else:
@@ -195,8 +203,8 @@ class HitLocator:
         area[1] = radius
 
         return self.get_near_hits(volume, layer, center, area)
- 
-def solve_helix(p1, p2, p3, B):
+
+def DEPRECATED_solve_helix(p1, p2, p3, B):
     """
     Gives the parameters of a circular helix fitted to 3 points.
     ---
@@ -270,24 +278,26 @@ def solve_helix(p1, p2, p3, B):
     omega12, phi12 = fit_helix(p1r, p2r)
     omega23, phi23 = fit_helix(p2r, p3r)
     omega13, phi13 = fit_helix(p1r, p3r)
-    print(omega12, omega23, omega13)
     
     omega = np.mean([omega12, omega23, omega13])
     phi = np.mean([phi12, phi23, phi13])
     
     return center, radius, omega, phi, Rot, Rot_inv
 
-def helix_stepper(points, B, stepsize, start_index=None):
+def helix_stepper(points, B, stepsize, save_helices=None, start_index=None):
     """
     Generator function that yields spaces points on helix
     ---
-    points      : float(3, 3) : Space points to fit helix to
-    B           : float(3)    : Magnetic field vector
-    stepsize    : float       : Spacial stepsize between consecutive points on helix to be yielded
-    start_index : int         : Index of element in points to start yielding from. If none start from furthest from origin.
+    points          : float(3, 3) : Space points to fit helix to
+    B               : float(3)    : Magnetic field vector
+    stepsize        : float       : Spacial stepsize between consecutive points on helix to be yielded
+    save_helices    : list        : Save helix solutions
+    start_index     : int         : Index of element in points to start yielding from. If none start from furthest from origin.
     ---
     point       : float(3)    : Next point on the helix
     """
+    THRESHOLD_RADIUS = 1000 # Radius at which we assume the particle will make at most 1 precession.
+
     if start_index is None:
         dists = [np.sum(p**2) for p in points]
         start = points[np.argmax(dists)]
@@ -297,19 +307,40 @@ def helix_stepper(points, B, stepsize, start_index=None):
     center, radius, omega, phi, Rot, Rot_inv = solve_helix(points[0], points[1], points[2], B)
     speed = np.sqrt(1 + (radius * omega)**2)
     delta_t = stepsize / speed
-    
-    start_r = Rot @ start
+
+    start_rot = Rot @ start
+    assert np.sum(start**2) == np.sum(start_rot**2)
+
     def helix(t):
         x = radius * np.cos(omega * t + phi) + center[0]
         y = radius * np.sin(omega * t + phi) + center[1]
         z = t
-        return np.array([x, y, z])
-    t = start_r[2]
+        return Rot_inv @ np.array([x, y, z])
     
+    start_r = np.sqrt(np.sum(start_rot**2))
+    if start_rot[2] < start_r and radius > THRESHOLD_RADIUS:
+        start_phi_raw = np.arctan2(start_rot[1], start_rot[0])
+        start_phi = start_phi_raw if start_phi_raw >= 0 else 2*np.pi + start_phi_raw
+        t = (start_phi - phi) / omega
+    else:
+        t = start_rot[2]
+
+    direction = np.int32(np.sum(helix(t)**2) < np.sum(helix(t + delta_t)**2))
+    direction = 2 * direction - 1
+    
+    if save_helices is not None:
+        solution = np.empty((3+3+3+3+1+1+1))
+        solution[0:9] = points.flatten()
+        solution[9:12] = center
+        solution[12] = radius
+        solution[13] = omega
+        solution[14] = phi
+        save_helices.append(solution)
+
     while True:
-        yield Rot_inv @ helix(t)
-        t += delta_t
+        yield helix(t)
+        t += direction * delta_t
 
 class BFieldMap:         
-    def get(pos):
+    def get(self, pos):
         return np.array([0, 0, 2])
