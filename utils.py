@@ -204,20 +204,7 @@ class HitLocator:
 
         return self.get_near_hits(volume, layer, center, area)
 
-def DEPRECATED_solve_helix(p1, p2, p3, B):
-    """
-    Gives the parameters of a circular helix fitted to 3 points.
-    ---
-    p1, p2, p3 : float(3)    : Space points to be fit to
-    B          : float(3)    : Magnetic field vector
-    ---
-    center     : float(3)    : center of helical cylinder in rotated coordinates
-    radius     : float       : radius of helical cylinder in rotated coordinates
-    omega      : float       : angular velocity of helix
-    phi        : float       : phase of helix
-    Rot        : float(3, 3) : Rotation matrix such that B points in z direction
-    Rot_inv    : float(3, 3) : Inverse of Rot
-    """
+def solve_helix(p1, p2, p3, B):
     def define_circle(p1, p2, p3):
         """
         Copy pasted from https://stackoverflow.com/questions/28910718/give-3-points-and-a-plot-circle
@@ -227,8 +214,7 @@ def DEPRECATED_solve_helix(p1, p2, p3, B):
         cd = (temp - p3[0] * p3[0] - p3[1] * p3[1]) / 2
         det = (p1[0] - p2[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p2[1])
 
-        if abs(det) < 1.0e-6:
-            return (None, np.inf)
+        assert abs(det) > 1.0e-6, "Points in a straight line"
 
         # Center of circle
         cx = (bc*(p2[1] - p3[1]) - cd*(p1[1] - p2[1])) / det
@@ -253,17 +239,8 @@ def DEPRECATED_solve_helix(p1, p2, p3, B):
         
         return I + v_x + ((1 - c)/s**2) * (v_x @ v_x)
     
-    def fit_helix(p0, p1):
-        """
-        Based on technique from https://www.geometrictools.com/Documentation/HelixFitting.pdf
-        """
-        #delta = p1[0]**2 * p2[1]**2 - p2[0]**2 * p1[1]**2
-        theta_0 = np.arctan(p0[1] / p0[0])
-        theta_1 = np.arctan(p1[1] / p0[0])
-        omega = (theta_1 - theta_0) / (p1[2] - p0[2])
-        phi = (theta_0 * p1[2] - theta_1 * p0[2]) / (p1[2] - p0[2])
-        return omega, phi
-        
+    print(p1, p2, p3)
+    
     Bnorm = B / np.sqrt(np.sum(B**2))
     Rot = rotation_matrix(Bnorm)
     Rot_inv = np.transpose(Rot)
@@ -275,14 +252,31 @@ def DEPRECATED_solve_helix(p1, p2, p3, B):
     p1r -= center
     p2r -= center
     p3r -= center
-    omega12, phi12 = fit_helix(p1r, p2r)
-    omega23, phi23 = fit_helix(p2r, p3r)
-    omega13, phi13 = fit_helix(p1r, p3r)
     
-    omega = np.mean([omega12, omega23, omega13])
-    phi = np.mean([phi12, phi23, phi13])
+    # Assume all points differ by no more than one complete arc
+    rotated_points = np.array([p1r, p2r, p3r])
+    rotated_points = rotated_points[np.argsort(rotated_points[:,-1])]
     
-    return center, radius, omega, phi, Rot, Rot_inv
+    angles = np.empty(rotated_points.shape[0])
+    for i, p in enumerate(rotated_points):
+        theta = np.arctan2(p[1], p[0])
+        angles[i] = theta if theta >= 0 else 2*np.pi + theta
+    
+    pos_angles = np.copy(angles)
+    for i in [1, 2]:
+        while pos_angles[i] < pos_angles[i-1]:
+            pos_angles[i] += 2*np.pi
+            
+    neg_angles = np.copy(angles)
+    for i in [1, 2]:
+        while neg_angles[i] > neg_angles[i-1]:
+            neg_angles[i] -= 2*np.pi
+    
+    angles = pos_angles if abs(pos_angles[1] - pos_angles[0]) < abs(neg_angles[1] - neg_angles[0]) else neg_angles
+            
+    result = stats.linregress(rotated_points[:,-1], angles)
+    
+    return center, radius, result.slope, result.intercept, Rot, Rot_inv
 
 def helix_stepper(points, B, stepsize, save_helices=None, start_index=None):
     """
