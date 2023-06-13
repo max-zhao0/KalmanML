@@ -6,6 +6,14 @@ import time
 BARRELS = {8, 13, 17}
 
 def make_locate_layer(hit_locator):
+    """
+    Makes a function that locates the closest layer to a spacepoint
+    ---
+    hit_locator		: utils.HitLocator	: HitLocator object with detector information
+    ---
+    Returns:
+    locate_layer	: func			: locating function
+    """
     Z1_BOUND = 3000
     Z0_BOUND = 1800
     
@@ -17,7 +25,16 @@ def make_locate_layer(hit_locator):
     
     def locate_layer(point):
         """
-        Finding of nearest layer
+        Finds the nearest layer to a given space point
+        ---
+        point		: array (3)	: space point in cartesian coordinates
+        ---
+	Returns:
+	exit_code	: int		: 0 - successfully found location, 1 - in between volumes, 2 - outside of detector
+        volume		: int		: detector volume id
+        layer		: int		: detector layer id
+        min_dist	: float		: distance to nearest layer (mm)
+        projection	: array (3)	: orthogonal projection of point onto nearest layer in cartesian coordinates
         """
         if abs(point[2]) > Z1_BOUND:
             return 2, None, None, None, None
@@ -74,6 +91,20 @@ def make_locate_layer(hit_locator):
     return locate_layer
 
 def propagate(points, stepsize, radius, hit_locator, locate_layer, bmap, helices=None):
+    """
+    Finds all hits on next layer
+    ---
+    points		: array (3,3)		: current triplet used to propagate
+    stepsize		: float			: stepsize with which to step on the helix
+    radius		: float			: radius around helix intersection to gather points
+    hit_locator		: utils.HitLocator	: HitLocator containing hits and detector info
+    locate_layer	: func			: function that finds nearest layer to a given space point
+    bmap		: utils.BFieldMap	: magnetic field object that gives B field at a given space point
+    helices		: list			: For debugging - list to save helix solutions
+    ---
+    Returns:
+    next_hits		: array (n,10)		: all hits on next layer
+    """
     avg_pos = np.mean(points, axis=0)
     stepper = utils.helix_stepper(points, bmap.get(avg_pos), stepsize, helices)
 
@@ -103,20 +134,16 @@ def propagate(points, stepsize, radius, hit_locator, locate_layer, bmap, helices
 
     return hit_locator.get_hits_around(volume, closest_layer, projection, radius), proj_3d
 
-def truth_seeds_DEPRECATED(locator):
-    first_layer = locator.get_layer_hits(8, 2)
-    second_layers = [locator.get_layer_hits(8, 4), locator.get_layer_hits(7, 14), locator.get_layer_hits(9, 2)]
-    
-    hit_pairs = []
-    for first_hit in first_layer:
-        for second_layer in second_layers:
-            matches = second_layer[second_layer[:,-1] == first_hit[-1]]
-            for second_hit in matches:
-                hit_pairs.append(np.array([first_hit, second_hit]))
-    
-    return np.array(hit_pairs)
-
 def truth_seeds(locator, pcut=None):
+    """
+    Truth seeding in innermost layers
+    ---
+    locator	: utils.HitLocator	: HitLocator object that contains the hits
+    pcut	: float			: NOT IMPLEMENTED
+    ---
+    Returns:
+    seeds	: array (n,3,10)	: truth seeds
+    """
     layer_graph = {
         (8, 2) : [(8,4), (7,14), (9,2)],
         (7, 14) : [(7,12)],
@@ -153,6 +180,20 @@ def truth_seeds(locator, pcut=None):
     return np.array(seeds)
 
 def generate_triplets(hits_path, detector_path, event_id, save_helices=False):
+    """
+    Generates training triplets for policy network
+    ---
+    hits_path		: string		: path to hits file
+    detector_path	: string		: path to detector file
+    event_id		: int			: event to generate triplets from
+    save_helices	: list			: for debugging - list to save helix solutions
+    ---
+    Returns:
+    triplets		: array (n,3,10)	: training triplets
+    labels		: array (n)		: training labels
+    finding_stats	: array (m,4)		: first three values are the positions of helix intersections. Last is binary if it successfully found next hit
+    ---
+    """
     locator_resolution = 5
     stepsize = 5
     radius = 150
@@ -230,7 +271,7 @@ def main(argv):
     nevents = 10
     
     triplets = []
-    labels = []
+    labels = np.array([])
     finding_stats = []
     helices = []
     for event_id in range(nevents):
@@ -243,10 +284,15 @@ def main(argv):
 
     finding_stats = np.array(finding_stats)
     helices = np.array(helices)
+    triplets = np.array(triplets)
+    print(triplets.shape)
+    triplets_flat = triplets.reshape((triplets.shape[0], 30))
 
     print("Total finding rate:", np.sum(finding_stats[:,-1]) / finding_stats.shape[0])
     np.savetxt(outdir + "finding_stats150.csv", finding_stats, delimiter=",")
     np.savetxt(outdir + "helices.csv", helices, delimiter=",")
+    np.savetxt(outdir + "triplets.csv", triplets_flat, delimiter=",")
+    np.savetxt(outdir + "labels.csv", labels, delimiter=",")
 
     print(sum(labels), len(labels))
     return 0

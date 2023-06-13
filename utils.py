@@ -1,5 +1,6 @@
 import numpy as np
 import h5py
+import scipy.stats as stats
 
 class HitLocator:
     # Volume ids in the detector
@@ -238,8 +239,6 @@ def solve_helix(p1, p2, p3, B):
         ])
         
         return I + v_x + ((1 - c)/s**2) * (v_x @ v_x)
-    
-    print(p1, p2, p3)
     
     Bnorm = B / np.sqrt(np.sum(B**2))
     Rot = rotation_matrix(Bnorm)
