@@ -2,6 +2,7 @@ import sys
 import numpy as np
 import utils
 import time
+import h5py
 
 BARRELS = {8, 13, 17}
 
@@ -179,13 +180,14 @@ def truth_seeds(locator, pcut=None):
 
     return np.array(seeds)
 
-def generate_triplets(hits_path, detector_path, event_id, save_helices=False):
+def generate_triplets(hits_path, detector_path, event_id, radius, save_helices=False):
     """
     Generates training triplets for policy network
     ---
     hits_path		: string		: path to hits file
     detector_path	: string		: path to detector file
     event_id		: int			: event to generate triplets from
+    radius          : int           : radius around which to search for hits around helix intersections
     save_helices	: list			: for debugging - list to save helix solutions
     ---
     Returns:
@@ -196,7 +198,6 @@ def generate_triplets(hits_path, detector_path, event_id, save_helices=False):
     """
     locator_resolution = 5
     stepsize = 5
-    radius = 150
     
     locator = utils.HitLocator(locator_resolution, detector_path)
     locator.load_hits(hits_path, event_id)
@@ -208,9 +209,8 @@ def generate_triplets(hits_path, detector_path, event_id, save_helices=False):
     triplets = []
     labels = []
     finding_stats = []
-    if save_helices:
-        helices = []
-    
+    helices = [] if save_helices else None
+
     prop_break = 0
     
     for seed in seeds:
@@ -255,7 +255,8 @@ def generate_triplets(hits_path, detector_path, event_id, save_helices=False):
             if predicted_pos is not None:
                 finding_stats.append(np.append(predicted_pos, np.array([np.int32(track_incomplete)])))
 
-    print("Event: " + str(event_id) + " Break rate: " + str(prop_break / seeds.shape[0]))
+    finding_stats = np.array(finding_stats)
+    print("Event: " + str(event_id) + " Finding rate: " + str(np.sum(finding_stats[:,-1]) / finding_stats.shape[0]))
     labels = np.concatenate(labels)
     assert len(labels) == len(triplets)
 
@@ -265,36 +266,29 @@ def generate_triplets(hits_path, detector_path, event_id, save_helices=False):
         return triplets, labels, finding_stats
   
 def main(argv):
-    hits_path = "/global/cfs/cdirs/atlas/jmw464/mlkf_data/python/ttbar60_10/processed/hits.hdf5"
+    hits_path = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/hits.hdf5"
     detector_path = "/global/homes/m/max_zhao/mlkf/trackml/data/detectors.csv"
-    outdir = "/global/homes/m/max_zhao/mlkf/trackml/data/triplets/"
-    nevents = 10
-    
-    triplets = []
-    labels = np.array([])
-    finding_stats = []
-    helices = []
-    for event_id in range(nevents):
-        event_triplets, event_labels, event_finding_stats, event_helices = generate_triplets(hits_path, detector_path, event_id, True)
+    outdir = "/global/cfs/cdirs/atlas/max_zhao/mlkf/triplets/"
+    nevents = 100
+    search_radii = [50, 100, 150]
 
-        triplets += event_triplets
-        labels = np.concatenate((labels, event_labels))
-        finding_stats += event_finding_stats
-        helices += event_helices
+    outfile = h5py.File(outdir + "triplets.hdf5", "w")
 
-    finding_stats = np.array(finding_stats)
-    helices = np.array(helices)
-    triplets = np.array(triplets)
-    print(triplets.shape)
-    triplets_flat = triplets.reshape((triplets.shape[0], 30))
+    for radius in search_radii:
+        for event_id in range(nevents):
+            groupname = str(radius) + "/" + str(event_id)
+            group = outfile.create_group(groupname)
 
-    print("Total finding rate:", np.sum(finding_stats[:,-1]) / finding_stats.shape[0])
-    np.savetxt(outdir + "finding_stats150.csv", finding_stats, delimiter=",")
-    np.savetxt(outdir + "helices.csv", helices, delimiter=",")
-    np.savetxt(outdir + "triplets.csv", triplets_flat, delimiter=",")
-    np.savetxt(outdir + "labels.csv", labels, delimiter=",")
+            event_triplets, event_labels, _ = generate_triplets(hits_path, detector_path, event_id, radius)
+            group.create_dataset("triplets", data=event_triplets)
+            group.create_dataset("labels", data=event_labels)
 
-    print(sum(labels), len(labels))
+    #print("Total finding rate:", np.sum(finding_stats[:,-1]) / finding_stats.shape[0])
+
+    #np.savetxt(outdir + "finding_stats_testing.csv", finding_stats, delimiter=",")
+    #np.savetxt(outdir + "triplets.csv", triplets_flat, delimiter=",")
+    #np.savetxt(outdir + "labels.csv", labels, delimiter=",")
+    outfile.close()
     return 0
   
 if __name__ == "__main__":
