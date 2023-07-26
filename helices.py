@@ -16,6 +16,12 @@ class Helix:
         pass
 
     def solve(self, p1, p2, p3, B):
+        """
+        Solves a helix from three space points given the local direction of the B field
+        ---
+        p1, p2, p3  : array(3)  : space points in cartesian coordinates
+        B           : array(3)  : direction of B field, magnitude unimportant
+        """
         points = np.array([p1, p2, p3])
         dists = [np.sum(p**2) for p in points]
         self.start_point = points[np.argmax(dists)]
@@ -91,6 +97,13 @@ class Helix:
         self.omega, self.phi = result.slope, result.intercept
         
     def curve(self, t):
+        """
+        Parametric equation for the helix
+        ---
+        t       : float     : Parametric variable
+        ---
+        pos     : array(3)  : Spacial position of the helix in cartesian coordinates
+        """
         x = self.radius * np.cos(self.omega * t + self.phi) + self.center[0]
         y = self.radius * np.sin(self.omega * t + self.phi) + self.center[1]
         z = t
@@ -128,6 +141,15 @@ class Helix:
             t += direction * delta_t
 
 def newton_intersection(helix, module, start_t):
+    """
+    Finds the intersection of a helix and a module using Newton's method
+    ---
+    helix   : Helix         : helix object
+    module  : pd.Dataframe  : module specifications loaded from standard detector file
+    start_t : float         : initial estimation parametric variable, i.e. helix.curve(start_t) is near the module
+    ---
+    pos     : array(3)      : position of the intersection
+    """
     module_center = np.array([module.cx, module.cy, module.cz])
     module_rotation = np.array([
         [module.rot_xu, module.rot_xv, module.rot_xw],
@@ -154,6 +176,17 @@ def newton_intersection(helix, module, start_t):
     return helix.curve(intersection_time)
 
 def find_helix_intersection(helix, geometry, stepsize):
+    """
+    Find intersection between a helix and the next layer
+    ---
+    helix               : Helix         : helix object
+    geometry            : pd.Dataframe  : dataframe with entries being all modules in the detector
+    stepsize            : float         : step size with which to go along the helix before applying Newton's method, in mm.
+    ---
+    intersection        : array(3)      : spacial position of intersection
+    intersection_vol    : int           : volume id for intersection layer
+    intersection_lay    : int           : layer id for intersection layer
+    """
     # Boundaries of the detector
     R_BOUND = 1050
     Z_BOUND = 3000

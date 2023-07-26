@@ -3,146 +3,20 @@ import numpy as np
 import utils
 import time
 import h5py
+import helices
 
-BARRELS = {8, 13, 17}
-
-def make_locate_layer(hit_locator):
-    """
-    Makes a function that locates the closest layer to a spacepoint
-    ---
-    hit_locator		: utils.HitLocator	: HitLocator object with detector information
-    ---
-    Returns:
-    locate_layer	: func			: locating function
-    """
-    Z1_BOUND = 3000
-    Z0_BOUND = 1800
-    
-    t_range, u_coord, layer_dict = hit_locator.get_detector_spec()
-    assert t_range[7][0] <= u_coord[8, 2]
-    R_range0 = t_range[7]
-    R_range1 = t_range[12]
-    R_range2 = t_range[16]
-    
-    def locate_layer(point):
-        """
-        Finds the nearest layer to a given space point
-        ---
-        point		: array (3)	: space point in cartesian coordinates
-        ---
-	Returns:
-	exit_code	: int		: 0 - successfully found location, 1 - in between volumes, 2 - outside of detector
-        volume		: int		: detector volume id
-        layer		: int		: detector layer id
-        min_dist	: float		: distance to nearest layer (mm)
-        projection	: array (3)	: orthogonal projection of point onto nearest layer in cartesian coordinates
-        """
-        if abs(point[2]) > Z1_BOUND:
-            return 2, None, None, None, None
-        
-        r = np.sqrt(point[0]**2 + point[1]**2)
-        if r < R_range0[0] or R_range0[1] < r < R_range1[0] or R_range1[1] < r < R_range2[0]:
-            return 1, None, None, None, None
-        elif R_range0[0] <= r <= R_range0[1]:
-            if abs(point[2]) > Z0_BOUND:
-                return 1, None, None, None, None
-            elif point[2] < t_range[8][0]:
-                volume = 7
-            elif point[2] > t_range[8][1]:
-                volume = 9
-            else:
-                volume = 8
-        elif R_range1[0] <= r <= R_range1[1]:
-            if point[2] < t_range[13][0]:
-                volume = 12
-            elif point[2] > t_range[13][1]:
-                volume = 14
-            else:
-                volume = 13
-        elif R_range2[0] <= r <= R_range2[1]:
-            if point[2] < t_range[17][0]:
-                volume = 16
-            elif point[2] > t_range[17][1]:
-                volume = 18
-            else:
-                volume = 17
-        else:
-            return 2, None, None, None, None
-        
-        min_dist = np.inf
-        raw_phi = np.arctan2(point[1], point[0])
-        phi = raw_phi if raw_phi >= 0 else 2*np.pi + raw_phi
-        if volume in BARRELS:
-            for lay in layer_dict[volume]:
-                dist = abs(u_coord[volume, lay] - r)
-                if dist < min_dist:
-                    min_dist = dist
-                    layer = lay
-            projection = (phi, point[2])
-        else:
-            for lay in layer_dict[volume]:
-                dist = abs(u_coord[volume, lay] - point[2])
-                if dist < min_dist:
-                    min_dist = dist
-                    layer = lay
-            projection = (phi, r)
-        
-        return 0, volume, layer, min_dist, projection
-    
-    return locate_layer
-
-def propagate(points, stepsize, radius, hit_locator, locate_layer, bmap, helices=None):
-    """
-    Finds all hits on next layer
-    ---
-    points		: array (3,3)		: current triplet used to propagate
-    stepsize		: float			: stepsize with which to step on the helix
-    radius		: float			: radius around helix intersection to gather points
-    hit_locator		: utils.HitLocator	: HitLocator containing hits and detector info
-    locate_layer	: func			: function that finds nearest layer to a given space point
-    bmap		: utils.BFieldMap	: magnetic field object that gives B field at a given space point
-    helices		: list			: For debugging - list to save helix solutions
-    ---
-    Returns:
-    next_hits		: array (n,10)		: all hits on next layer
-    """
-    avg_pos = np.mean(points, axis=0)
-    stepper = utils.helix_stepper(points, bmap.get(avg_pos), stepsize, helices)
-
-    _, curr_vol, curr_lay, _, _ = locate_layer(points[-1])
-    _, u_coord, _ = hit_locator.get_detector_spec()
-
-    near_next_layer = False
-    while not near_next_layer:
-        curr_pos = next(stepper)
-
-        exit_code, volume, closest_layer, dist, projection = locate_layer(curr_pos)
-        if exit_code == 1:
-            continue
-        elif exit_code == 2:
-            return None, None
-        
-        different_layer = volume != curr_vol or closest_layer != curr_lay
-        near_next_layer = different_layer and dist < 2*stepsize
-    
-    if volume in BARRELS:
-        r = u_coord[volume,closest_layer]
-        phi, z = projection
-    else:
-        z = u_coord[volume,closest_layer]
-        phi, r = projection
-    proj_3d = np.array([r*np.cos(phi), r*np.sin(phi), z])
-
-    return hit_locator.get_hits_around(volume, closest_layer, projection, radius), proj_3d
+def arctan(y, x):
+    raw_phi = np.arctan2(y, x)
+    phi = raw_phi if raw_phi >= 0 else 2*np.pi + raw_phi
+    return phi
 
 def truth_seeds(locator, pcut=None):
     """
     Truth seeding in innermost layers
     ---
     locator	: utils.HitLocator	: HitLocator object that contains the hits
-    pcut	: float			: NOT IMPLEMENTED
+    pcut	: float			    : NOT IMPLEMENTED
     ---
-    Returns:
     seeds	: array (n,3,10)	: truth seeds
     """
     layer_graph = {
@@ -180,45 +54,70 @@ def truth_seeds(locator, pcut=None):
 
     return np.array(seeds)
 
-def generate_triplets(hits_path, detector_path, event_id, radius, save_helices=False):
+def get_next_hits(points, stepsize, radius, hit_locator, geometry):
+    """
+    Find all plausible next hits given last three hits
+    ---
+    points      : array(3,3)        : last three points of track candidate
+    stepsize    : float             : step size in mm with which to step on helix
+    radius      : float             : search radius in mm around helix intersection
+    hit_locator : utils.HitLocator  : hit locating object
+    geometry    : utils.Geometry    : detector geometry object
+    ---
+    hits        : array(10,n)       : next hits
+    """
+    helix = helices.Helix()
+    avg_pos = np.mean(points, axis=0)
+    helix.solve(points[0], points[1], points[2], geometry.bmap.get(avg_pos))
+    intersection, inter_vol, inter_lay = helices.find_helix_intersection(helix, geometry, stepsize)
+   
+    if intersection is None:
+        return None, None
+
+    inter_phi = arctan(intersection[1], intersection[0])
+    inter_t = intersection[2] if inter_vol in geometry.BARRELS else np.sqrt(intersection[0]**2 + intersection[1]**2)
+    projection = (inter_phi, inter_t)
+
+    return hit_locator.get_hits_around(inter_vol, inter_lay, projection, radius), intersection
+
+def generate_triplets(hits_path, detector_path, event_id, radius, histograms):
     """
     Generates training triplets for policy network
     ---
-    hits_path		: string		: path to hits file
-    detector_path	: string		: path to detector file
-    event_id		: int			: event to generate triplets from
-    radius          : int           : radius around which to search for hits around helix intersections
-    save_helices	: list			: for debugging - list to save helix solutions
+    hits_path		: string	    	: path to hits file
+    detector_path	: string		    : path to detector file
+    event_id		: int			    : event to generate triplets from
+    radius          : int               : radius around which to search for hits around helix intersections
     ---
-    Returns:
     triplets		: array (n,3,10)	: training triplets
-    labels		: array (n)		: training labels
+    labels		    : array (n)		    : training labels
     finding_stats	: array (m,4)		: first three values are the positions of helix intersections. Last is binary if it successfully found next hit
     ---
     """
     locator_resolution = 5
     stepsize = 5
     
+    geometry = utils.Geometry(detector_path, utils.BFieldMap())
     locator = utils.HitLocator(locator_resolution, detector_path)
     locator.load_hits(hits_path, event_id)
 
-    locate_layer = make_locate_layer(locator)
-    bmap = utils.BFieldMap()
     seeds = truth_seeds(locator)
 
     triplets = []
     labels = []
     finding_stats = []
-    helices = [] if save_helices else None
 
     prop_break = 0
     
     for seed in seeds:
         # Special treatmenet for seed
-        if True:
-            exit_code, volume, closest_layer, dist, projection = locate_layer(seed[-1,6:9])
-            assert exit_code == 0
-            new_hits = locator.get_hits_around(volume, closest_layer, projection, radius)
+        if False:
+            volume, layer, _  = geometry.nearest_layer(seed[-1,6:9])
+            seed_phi = arctan(seed[-1,7], seed[-1,6])
+            seed_t = seed[-1,8] if volume in geometry.BARRELS else np.sqrt(seed[-1,7]**2 + seed[-1,6]**2)
+            projection = (seed_phi, seed_t)
+
+            new_hits = locator.get_hits_around(volume, layer, projection, radius)
             match_ind = new_hits[:,-1] == seed[-1,-1]
 
             for hit in new_hits:
@@ -229,7 +128,7 @@ def generate_triplets(hits_path, detector_path, event_id, radius, save_helices=F
         prev_triplet = seed
         track_incomplete = True
         while track_incomplete:
-            new_hits, predicted_pos = propagate(prev_triplet[:,6:9], stepsize, radius, locator, locate_layer, bmap, helices)
+            new_hits, predicted_pos = get_next_hits(prev_triplet[:,6:9], stepsize, radius, locator, geometry)
 
             if new_hits is None or len(new_hits) == 0:
                 # Terminate track if no new hits are found
@@ -239,10 +138,18 @@ def generate_triplets(hits_path, detector_path, event_id, radius, save_helices=F
                 #labels = np.concatenate((labels, np.int32(match_ind)))
                 labels.append(np.int32(match_ind))
                 for hit in new_hits:
-                    triplets.append(np.append(prev_triplet[1:], np.array([hit]), 0))
+                    triplets.append(np.append(prev_triplet, np.array([hit]), 0))
 
                 matches = new_hits[match_ind]
                 not_matches = new_hits[~match_ind]
+               
+                dist_to_predicted = lambda hits: np.sqrt(np.sum((hits[:,6:9] - predicted_pos)**2, axis=1))
+                match_dists = dist_to_predicted(matches)
+                not_match_dists = dist_to_predicted(not_matches)
+                for dist in match_dists:
+                    histograms[0][np.int32(dist)] += 1
+                for dist in not_match_dists:
+                    histograms[1][np.int32(dist)] += 1
                 
                 if matches.shape[0] == 0:
                     track_incomplete = False
@@ -254,35 +161,40 @@ def generate_triplets(hits_path, detector_path, event_id, radius, save_helices=F
             
             if predicted_pos is not None:
                 finding_stats.append(np.append(predicted_pos, np.array([np.int32(track_incomplete)])))
-
+    
     finding_stats = np.array(finding_stats)
     print("Event: " + str(event_id) + " Finding rate: " + str(np.sum(finding_stats[:,-1]) / finding_stats.shape[0]))
     labels = np.concatenate(labels)
     assert len(labels) == len(triplets)
 
-    if save_helices:
-        return triplets, labels, finding_stats, helices
-    else:
-        return triplets, labels, finding_stats
+    return triplets, labels, finding_stats
   
 def main(argv):
     hits_path = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/hits.hdf5"
     detector_path = "/global/homes/m/max_zhao/mlkf/trackml/data/detectors.csv"
     outdir = "/global/cfs/cdirs/atlas/max_zhao/mlkf/triplets/"
-    nevents = 100
-    search_radii = [50, 100, 150]
+    events = range(100)
+    search_radii = [30]
 
-    outfile = h5py.File(outdir + "triplets.hdf5", "w")
+    outfile = h5py.File(outdir + "quadruplets30.hdf5", "w")
 
     for radius in search_radii:
-        for event_id in range(nevents):
+        histograms = [[0 for _ in range(2*radius)], [0 for _ in range(2*radius)]]
+
+        for event_id in events:
             groupname = str(radius) + "/" + str(event_id)
             group = outfile.create_group(groupname)
-
-            event_triplets, event_labels, _ = generate_triplets(hits_path, detector_path, event_id, radius)
-            group.create_dataset("triplets", data=event_triplets)
+            
+            start_time = time.time()
+            event_triplets, event_labels, event_finding_stats = generate_triplets(hits_path, detector_path, event_id, radius, histograms)
+            print("Finished in:", time.time() - start_time)
+            
+            group.create_dataset("quadruplets", data=event_triplets)
             group.create_dataset("labels", data=event_labels)
 
+        np.savetxt(outdir + "histograms.csv", np.array(histograms), delimiter=",")
+
+    #finding_stats = np.array(finding_stats)
     #print("Total finding rate:", np.sum(finding_stats[:,-1]) / finding_stats.shape[0])
 
     #np.savetxt(outdir + "finding_stats_testing.csv", finding_stats, delimiter=",")

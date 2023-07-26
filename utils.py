@@ -7,6 +7,7 @@ class Geometry:
     VOLUMES = np.array([7, 8, 9, 12, 13, 14, 16, 17, 18])
     # Volumes that are barrel shaped
     BARRELS = {8, 13, 17}
+    # Buffer around layers with which to define volumes
     Z_BUFFER = 50
     R_BUFFER = 25
 
@@ -17,6 +18,12 @@ class Geometry:
     detector_map = {}
 
     def __init__(self, detector_path, bmap):
+        """
+        Initializes geometry object
+        ---
+        detector_path   : string        : path to detector file from https://www.kaggle.com/competitions/trackml-particle-identification/data
+        bmap            : BFieldMap     : B field object
+        """
         self.detector = pd.read_csv(detector_path)
         self.bmap = bmap
 
@@ -78,6 +85,15 @@ class Geometry:
             self.volume_bounds[vol] = np.array([r_min, r_max, z_min, z_max])
 
     def nearest_layer(self, point):
+        """
+        Find the nearest layer to a given space point
+        ---
+        point       : array(3)  : space point in cartesian coordinates
+        ---
+        volume      : int       : volume id for nearest layer
+        layer       : int       : layer id for nearest layer
+        distance    : float     : distance to nearest layer in mm
+        """
         assert len(point) == 3
         point_r = np.sqrt(point[0]**2 + point[1]**2)
         point_z = point[2]
@@ -192,16 +208,6 @@ class HitLocator:
 
             self.hit_map[volume] = vol_map
 
-    def get_detector_spec(self):
-        """
-        Gets detector info
-        ---
-        t_range     : dict      : indexed by volume, gives range of z/r depending on if barrel or endcap respectively
-        u_coord     : dict      : indexed by (volume, layer), gives coordinate that specifies layers position: r/z respectively for barrel and endcap.
-        layer_dict  : dict      : indexed by volume, gives list of layers in each volume.
-        """
-        return self.t_range.copy(), self.u_coord.copy(), self.layer_dict.copy()
-
     def load_hits(self, hits_path, event_id, layers_to_save={(8,2), (8,4), (7,14), (9,2), (8,6), (7,12), (9,4)}):
         """
         Load hits into data structure from hits file
@@ -249,6 +255,8 @@ class HitLocator:
         ---
         volume  : int
         layer   : int
+        ---
+        hits    : array(10,n)
         """
         return self.full_layers[volume, layer]
 
@@ -261,7 +269,6 @@ class HitLocator:
         center  : (float, float)    : point around which to collect hits. Of the form (phi, t) where t = z if barrel volume and r if endcap
         area    : (float, float)    : range with which to collect hits. Essentially collect hits with coordinate in center +- area
         ---
-        Returns:
         hits    : array             : array of hits
         """
         assert area[0] > 0 and area[1] > 0
@@ -295,7 +302,6 @@ class HitLocator:
         center  : (float, float)    : point around which to collect hits. Of the form (phi, t) where t = z if barrel volume and r if endcap
         radius  : float             : radius around which to collect hits.
         ```
-        Returns:
         hits    : List              : list of hits
         """
         area = np.empty(2)
