@@ -1,12 +1,132 @@
 import numpy as np
 import h5py
+import pandas as pd
 
-class HitLocator:
+class Geometry:
     # Volume ids in the detector
-    volume_lst = np.array([7, 8, 9, 12, 13, 14, 16, 17, 18])
+    VOLUMES = np.array([7, 8, 9, 12, 13, 14, 16, 17, 18])
     # Volumes that are barrel shaped
-    barrel_set = {8, 13, 17}
+    BARRELS = {8, 13, 17}
+    # Buffer around layers with which to define volumes
+    Z_BUFFER = 50
+    R_BUFFER = 25
 
+    detector = None
+    bmap = None
+    volume_bounds = {}
+    layer_bounds = {}
+    detector_map = {}
+
+    def __init__(self, detector_path, bmap):
+        """
+        Initializes geometry object
+        ---
+        detector_path   : string        : path to detector file from https://www.kaggle.com/competitions/trackml-particle-identification/data
+        bmap            : BFieldMap     : B field object
+        """
+        self.detector = pd.read_csv(detector_path)
+        self.bmap = bmap
+
+        for vol in self.VOLUMES:
+            vol_modules = self.detector.loc[self.detector.volume_id == vol]
+            layer_ids = set(vol_modules.layer_id)
+            self.detector_map[vol] = {}
+
+            r_min = np.inf
+            r_max = -np.inf
+            z_min = np.inf
+            z_max = -np.inf
+            
+            for lay in layer_ids:
+                lay_modules = vol_modules.loc[vol_modules.layer_id == lay]
+                self.detector_map[vol][lay] = lay_modules
+
+                lay_min = np.inf
+                lay_max = -np.inf
+
+                for i in range(lay_modules.shape[0]):
+                    module = lay_modules.iloc[i]
+                    rotation_matrix = np.array([
+                        [module.rot_xu, module.rot_xv, module.rot_xw],
+                        [module.rot_yu, module.rot_yv, module.rot_yw],
+                        [module.rot_zu, module.rot_zv, module.rot_zw]
+                    ])
+                    center = np.array([module.cx, module.cy, module.cz])
+                    
+                    transform_xyz = lambda uvw: rotation_matrix @ uvw + center
+                    for pm_du, dv in [(module.module_maxhu, module.module_hv), (module.module_minhu, -module.module_hv)]:
+                        for du in [pm_du, -pm_du]:
+                            corner = transform_xyz(np.array([du, dv, 0]))
+                            corner_r = np.sqrt(np.sum(corner[:2]**2))
+                            corner_z = corner[2]
+                            if corner_r > r_max:
+                                r_max = corner_r
+                            elif corner_r < r_min:
+                                r_min = corner_r
+                            if corner_z > z_max:
+                                z_max = corner_z
+                            elif corner_z < z_min:
+                                z_min = corner_z 
+
+                            corner_lay = corner_r if vol in self.BARRELS else corner_z
+                            if corner_lay > lay_max:
+                                lay_max = corner_lay
+                            elif corner_lay < lay_min:
+                                lay_min = corner_lay
+                
+                if vol not in self.layer_bounds:
+                    self.layer_bounds[vol] = {}
+                self.layer_bounds[vol][lay] = np.array([lay_min, lay_max])
+
+            r_min -= self.R_BUFFER
+            r_max += self.R_BUFFER
+            z_min -= self.Z_BUFFER
+            z_max += self.Z_BUFFER
+            self.volume_bounds[vol] = np.array([r_min, r_max, z_min, z_max])
+
+    def nearest_layer(self, point):
+        """
+        Find the nearest layer to a given space point
+        ---
+        point       : array(3)  : space point in cartesian coordinates
+        ---
+        volume      : int       : volume id for nearest layer
+        layer       : int       : layer id for nearest layer
+        distance    : float     : distance to nearest layer in mm
+        """
+        assert len(point) == 3
+        point_r = np.sqrt(point[0]**2 + point[1]**2)
+        point_z = point[2]
+
+        volume = None
+        for vol in self.volume_bounds:
+            if self.volume_bounds[vol][0] <= point_r <= self.volume_bounds[vol][1] and self.volume_bounds[vol][2] <= point_z <= self.volume_bounds[vol][3]:
+                volume = vol
+                break
+        
+        if volume is None:
+            layer = None
+            distance = None
+        else:
+            distance = np.inf
+            point_s = point_r if vol in self.BARRELS else point_z
+            
+            for lay in self.layer_bounds[vol]:
+                lay_dist = abs(np.mean(self.layer_bounds[vol][lay]) - point_s)
+                if lay_dist < distance:
+                    distance = lay_dist
+                    layer = lay
+
+        return volume, layer, distance
+
+    def nearest_modules(self, volume, layer, point, nmodules=4):
+        lay_modules = self.detector_map[volume][layer]
+        square_distances = (lay_modules.cx - point[0])**2 + (lay_modules.cy - point[1])**2 + (lay_modules.cz - point[2])**2
+        indices = np.argpartition(square_distances, nmodules)
+        closest_modules = lay_modules.iloc[indices[:nmodules]]
+        return closest_modules
+
+class HitLocator: 
     hit_map = {}
     # Range of z for barrels, r for endcaps. Defined on volumes.
     t_range = {}
@@ -27,7 +147,7 @@ class HitLocator:
         """
         volume_id, layer_id, module_id, cx, cy, cz, hv = np.loadtxt(detector_path, delimiter=",", skiprows=1, usecols=[0,1,2,3,4,5,18], unpack=True)
         
-        for volume in self.volume_lst:
+        for volume in Geometry.VOLUMES:
             self.layer_dict[volume] = []
             
             lay_id_vol = layer_id[volume_id == volume]
@@ -38,7 +158,7 @@ class HitLocator:
             max_hv = max(hv_vol)
 
             vol_map = {}
-            if volume in self.barrel_set:
+            if volume in Geometry.BARRELS:
                 min_z = min(cz_vol) - max_hv
                 max_z = max(cz_vol) + max_hv
                 self.t_range[volume] = (min_z, max_z)
@@ -58,8 +178,17 @@ class HitLocator:
                 cr_vol = np.sqrt(cx_vol**2 + cy_vol**2)
                 min_r = min(cr_vol) - max_hv
                 max_r = max(cr_vol) + max_hv
-                self.t_range[volume] = (min_r, max_r)
                 
+                if volume == 16 or volume == 18:
+                    # Unfortunate hack
+                    max_r += 6
+                elif volume == 7 or volume == 9:
+                    max_r += 1
+                elif volume == 12 or volume == 14:
+                    max_r += 1
+
+                self.t_range[volume] = (min_r, max_r)
+
                 r_dim = round(np.ceil((max_r - min_r) / resolution))
                 phi_dim = round(np.ceil(np.pi * (max_r + min_r) / resolution))
                 
@@ -79,17 +208,7 @@ class HitLocator:
 
             self.hit_map[volume] = vol_map
 
-    def get_detector_spec(self):
-        """
-        Gets detector info
-        ---
-        t_range     : dict      : indexed by volume, gives range of z/r depending on if barrel or endcap respectively
-        u_coord     : dict      : indexed by (volume, layer), gives coordinate that specifies layers position: r/z respectively for barrel and endcap.
-        layer_dict  : dict      : indexed by volume, gives list of layers in each volume.
-        """
-        return self.t_range.copy(), self.u_coord.copy(), self.layer_dict.copy()
-
-    def load_hits(self, hits_path, event_id, layers_to_save={(8,2), (8,4), (7,14), (9,2)}):
+    def load_hits(self, hits_path, event_id, layers_to_save={(8,2), (8,4), (7,14), (9,2), (8,6), (7,12), (9,4)}):
         """
         Load hits into data structure from hits file
         ---
@@ -121,11 +240,10 @@ class HitLocator:
                 phi = raw_phi if raw_phi >= 0 else 2 * np.pi + raw_phi
                 phi_coord = round((phi / (2 * np.pi)) * (lay_map.shape[0] - 1))
 
-                if volume in self.barrel_set:
-                    t_coord = round((lay_map.shape[1] - 1) * (z - vol_range[0]) / (vol_range[1] - vol_range[0]))
-                else:
-                    r = np.sqrt(x**2 + y**2)
-                    t_coord = round((lay_map.shape[1] - 1) * (r - vol_range[0]) / (vol_range[1] - vol_range[0]))
+                t = z if volume in Geometry.BARRELS else np.sqrt(x**2 + y**2)
+                
+                assert vol_range[0] <= t <= vol_range[1], str(t) + " Vol: " + str(volume) + " " + str(vol_range)
+                t_coord = round((lay_map.shape[1] - 1) * (t - vol_range[0]) / (vol_range[1] - vol_range[0]))
 
                 lay_map[phi_coord, t_coord].append(hit)
 
@@ -137,6 +255,8 @@ class HitLocator:
         ---
         volume  : int
         layer   : int
+        ---
+        hits    : array(10,n)
         """
         return self.full_layers[volume, layer]
 
@@ -149,7 +269,6 @@ class HitLocator:
         center  : (float, float)    : point around which to collect hits. Of the form (phi, t) where t = z if barrel volume and r if endcap
         area    : (float, float)    : range with which to collect hits. Essentially collect hits with coordinate in center +- area
         ---
-        Returns:
         hits    : array             : array of hits
         """
         assert area[0] > 0 and area[1] > 0
@@ -183,11 +302,10 @@ class HitLocator:
         center  : (float, float)    : point around which to collect hits. Of the form (phi, t) where t = z if barrel volume and r if endcap
         radius  : float             : radius around which to collect hits.
         ```
-        Returns:
         hits    : List              : list of hits
         """
         area = np.empty(2)
-        if volume in self.barrel_lst:
+        if volume in Geometry.BARRELS:
             s = self.u_coord[(volume, layer)]
             area[0] = radius / s
         else:
@@ -195,121 +313,7 @@ class HitLocator:
         area[1] = radius
 
         return self.get_near_hits(volume, layer, center, area)
- 
-def solve_helix(p1, p2, p3, B):
-    """
-    Gives the parameters of a circular helix fitted to 3 points.
-    ---
-    p1, p2, p3 : float(3)    : Space points to be fit to
-    B          : float(3)    : Magnetic field vector
-    ---
-    center     : float(3)    : center of helical cylinder in rotated coordinates
-    radius     : float       : radius of helical cylinder in rotated coordinates
-    omega      : float       : angular velocity of helix
-    phi        : float       : phase of helix
-    Rot        : float(3, 3) : Rotation matrix such that B points in z direction
-    Rot_inv    : float(3, 3) : Inverse of Rot
-    """
-    def define_circle(p1, p2, p3):
-        """
-        Copy pasted from https://stackoverflow.com/questions/28910718/give-3-points-and-a-plot-circle
-        """
-        temp = p2[0] * p2[0] + p2[1] * p2[1]
-        bc = (p1[0] * p1[0] + p1[1] * p1[1] - temp) / 2
-        cd = (temp - p3[0] * p3[0] - p3[1] * p3[1]) / 2
-        det = (p1[0] - p2[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p2[1])
-
-        if abs(det) < 1.0e-6:
-            return (None, np.inf)
-
-        # Center of circle
-        cx = (bc*(p2[1] - p3[1]) - cd*(p1[1] - p2[1])) / det
-        cy = ((p1[0] - p2[0]) * cd - (p2[0] - p3[0]) * bc) / det
-
-        radius = np.sqrt((cx - p1[0])**2 + (cy - p1[1])**2)
-        return np.array([cx, cy, 0]), radius
-    
-    def rotation_matrix(a, b=np.array([0, 0, 1])):
-        if (a == b).all():
-            return np.identity(3)
-        v = np.cross(a, b)
-        s = np.sqrt(np.sum(v**2))
-        c = np.dot(a, b)
-        
-        I = np.identity(3)
-        v_x = np.array([
-            [0    , -v[2], v[1] ],
-            [v[2] , 0    , -v[0]],
-            [-v[1], v[0] , 0    ]
-        ])
-        
-        return I + v_x + ((1 - c)/s**2) * (v_x @ v_x)
-    
-    def fit_helix(p0, p1):
-        """
-        Based on technique from https://www.geometrictools.com/Documentation/HelixFitting.pdf
-        """
-        #delta = p1[0]**2 * p2[1]**2 - p2[0]**2 * p1[1]**2
-        theta_0 = np.arctan(p0[1] / p0[0])
-        theta_1 = np.arctan(p1[1] / p0[0])
-        omega = (theta_1 - theta_0) / (p1[2] - p0[2])
-        phi = (theta_0 * p1[2] - theta_1 * p0[2]) / (p1[2] - p0[2])
-        return omega, phi
-        
-    Bnorm = B / np.sqrt(np.sum(B**2))
-    Rot = rotation_matrix(Bnorm)
-    Rot_inv = np.transpose(Rot)
-    p1r = Rot @ p1
-    p2r = Rot @ p2
-    p3r = Rot @ p3
-    
-    center, radius = define_circle(p1r[:2], p2r[:2], p3r[:2])
-    p1r -= center
-    p2r -= center
-    p3r -= center
-    omega12, phi12 = fit_helix(p1r, p2r)
-    omega23, phi23 = fit_helix(p2r, p3r)
-    omega13, phi13 = fit_helix(p1r, p3r)
-    print(omega12, omega23, omega13)
-    
-    omega = np.mean([omega12, omega23, omega13])
-    phi = np.mean([phi12, phi23, phi13])
-    
-    return center, radius, omega, phi, Rot, Rot_inv
-
-def helix_stepper(points, B, stepsize, start_index=None):
-    """
-    Generator function that yields spaces points on helix
-    ---
-    points      : float(3, 3) : Space points to fit helix to
-    B           : float(3)    : Magnetic field vector
-    stepsize    : float       : Spacial stepsize between consecutive points on helix to be yielded
-    start_index : int         : Index of element in points to start yielding from. If none start from furthest from origin.
-    ---
-    point       : float(3)    : Next point on the helix
-    """
-    if start_index is None:
-        dists = [np.sum(p**2) for p in points]
-        start = points[np.argmax(dists)]
-    else:
-        start = points[start_index]
-        
-    center, radius, omega, phi, Rot, Rot_inv = solve_helix(points[0], points[1], points[2], B)
-    speed = np.sqrt(1 + (radius * omega)**2)
-    delta_t = stepsize / speed
-    
-    start_r = Rot @ start
-    def helix(t):
-        x = radius * np.cos(omega * t + phi) + center[0]
-        y = radius * np.sin(omega * t + phi) + center[1]
-        z = t
-        return np.array([x, y, z])
-    t = start_r[2]
-    
-    while True:
-        yield Rot_inv @ helix(t)
-        t += delta_t
 
 class BFieldMap:         
-    def get(pos):
+    def get(self, pos):
         return np.array([0, 0, 2])
