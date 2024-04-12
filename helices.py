@@ -3,7 +3,10 @@ import utils
 import scipy.optimize as opt
 import scipy.stats as stats
 
+import matplotlib.pyplot as plt
+
 class Helix:
+    points = None
     center = None
     radius = None
     phi = None
@@ -22,9 +25,9 @@ class Helix:
         p1, p2, p3  : array(3)  : space points in cartesian coordinates
         B           : array(3)  : direction of B field, magnitude unimportant
         """
-        points = np.array([p1, p2, p3])
-        dists = [np.sum(p**2) for p in points]
-        self.start_point = points[np.argmax(dists)]
+        self.points = np.array([p1, p2, p3])
+        dists = [np.sum(p**2) for p in self.points]
+        self.start_point = self.points[np.argmax(dists)]
 
         def define_circle(p1, p2, p3):
             """
@@ -78,8 +81,9 @@ class Helix:
 
         angles = np.empty(rotated_points.shape[0])
         for i, p in enumerate(rotated_points):
-            theta = np.arctan2(p[1], p[0])
-            angles[i] = theta if theta >= 0 else 2*np.pi + theta
+            #theta = np.arctan2(p[1], p[0])
+            angles[i] = utils.arctan(p[1], p[0])
+            #theta if theta >= 0 else 2*np.pi + theta
                                 
         pos_angles = np.copy(angles)
         for i in [1, 2]:
@@ -127,8 +131,9 @@ class Helix:
 
         start_r = np.sqrt(np.sum(start_rot**2))
         if start_rot[2] < start_r and self.radius > THRESHOLD_RADIUS:
-            start_phi_raw = np.arctan2(start_rot[1], start_rot[0])
-            start_phi = start_phi_raw if start_phi_raw >= 0 else 2*np.pi + start_phi_raw
+            #start_phi_raw = np.arctan2(start_rot[1], start_rot[0])
+            #start_phi = start_phi_raw if start_phi_raw >= 0 else 2*np.pi + start_phi_raw
+            start_phi = utils.arctan(start_rot[1], start_rot[0])
             t = (start_phi - self.phi) / self.omega
         else:
             t = start_rot[2]
@@ -161,17 +166,30 @@ def newton_intersection(helix, module, start_t):
         pos_uvw = np.transpose(module_rotation) @ (pos_xyz - module_center)
         return pos_uvw
 
-    intersection_time = opt.newton(lambda t: curve_mf(t)[2], start_t) 
+    try:
+        intersection_time = opt.newton(lambda t: curve_mf(t)[2], start_t) 
+    except(RuntimeError):
+        # print(helix.points)
+        # print(module)
+        # print(start_t)
+        rnum = np.random.rand()
+        if rnum < 0.01:
+            times = np.linspace(start_t - 100, start_t + 100)
+            plt.figure()
+            plt.plot(times, list(map(lambda t: curve_mf(t)[2], times)))
+            plt.savefig("/global/homes/m/max_zhao/bin/newton{}.png".format(int(rnum*10000)))
+            plt.close()
+        return None
     
     # Check if intersection is within module boundaries
     u, v, w = curve_mf(intersection_time)
-    if module.module_maxhu == module.module_minhu:
-        within_module = abs(v) <= module.module_hv and abs(u) <= module.module_maxhu
-    else:
-        side_boundary = lambda x, side: side*(2*module.module_hv / (module.module_maxhu - module.module_minhu)) * (x - side*0.5*(module.module_maxhu + module.module_minhu))
-        within_module = abs(v) <= module.module_hv and v >= side_boundary(u, 1) and v >= side_boundary(u, -1)
+    # if module.module_maxhu == module.module_minhu:
+    #     within_module = abs(v) <= module.module_hv and abs(u) <= module.module_maxhu
+    # else:
+    #     side_boundary = lambda x, side: side*(2*module.module_hv / (module.module_maxhu - module.module_minhu)) * (x - side*0.5*(module.module_maxhu + module.module_minhu))
+    #     within_module = abs(v) <= module.module_hv and v >= side_boundary(u, 1) and v >= side_boundary(u, -1)
 
-    if not within_module:
+    if not utils.check_module_boundary(u, v, module):
         return None
     return helix.curve(intersection_time)
 
@@ -221,3 +239,29 @@ def find_helix_intersection(helix, geometry, stepsize):
                     break
 
     return intersection, intersection_vol, intersection_lay
+
+def get_next_hits(points, stepsize, radius, hit_locator, geometry):
+    """
+    Find all plausible next hits given last three hits
+    ---
+    points      : array(3,3)        : last three points of track candidate
+    stepsize    : float             : step size in mm with which to step on helix
+    radius      : float             : search radius in mm around helix intersection
+    hit_locator : utils.HitLocator  : hit locating object
+    geometry    : utils.Geometry    : detector geometry object
+    ---
+    hits        : array(10,n)       : next hits
+    """
+    helix = Helix()
+    avg_pos = np.mean(points, axis=0)
+    helix.solve(points[0], points[1], points[2], geometry.bmap.get(avg_pos))
+    intersection, inter_vol, inter_lay = find_helix_intersection(helix, geometry, stepsize)
+   
+    if intersection is None:
+        return None, None
+
+    inter_phi = utils.arctan(intersection[1], intersection[0])
+    inter_t = intersection[2] if inter_vol in geometry.BARRELS else np.sqrt(intersection[0]**2 + intersection[1]**2)
+    projection = (inter_phi, inter_t)
+
+    return hit_locator.get_hits_around(inter_vol, inter_lay, projection, radius), intersection

@@ -2,12 +2,15 @@
 
 import pathlib, acts, acts.examples, os
 from acts.examples.simulation import addPythia8, MomentumConfig, EtaConfig, ParticleConfig, addFatras, addDigitization, ParticleSelectorConfig
-from acts.examples.reconstruction import addSeeding, addCKFTracks, CKFPerformanceConfig, TrackSelectorRanges, TruthSeedRanges
+from acts.examples.reconstruction import addSeeding, addCKFTracks, TrackSelectorConfig, TruthSeedRanges, CkfConfig
 from acts.examples.odd import getOpenDataDetector
 
-actsdir = "/global/homes/j/jmw464/ATLAS/Software/acts21.2/"
-datadir = "/global/cfs/cdirs/atlas/jmw464/mlkf_data/python"
-nevents = 200
+chi2cut = 300.0
+event_set = 1
+
+actsdir = "/home/max_zhao/acts/"
+datadir = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/1000events/event_set{}/".format(event_set)
+nevents = 100
 cms_energy = 14 #TeV
 npileup = 200
 detector = "generic"
@@ -16,6 +19,7 @@ u = acts.UnitConstants
 outputDir = datadir+"ttbar"+str(npileup)+"_"+str(nevents)+"/"
 #outputDirCsv = outputDir+"csv/"
 
+if not os.path.exists(datadir): os.mkdir(datadir)
 if not os.path.exists(outputDir): os.mkdir(outputDir)
 #if not os.path.exists(outputDirCsv): os.mkdir(outputDirCsv)
 
@@ -34,7 +38,7 @@ else:
     print("Choose odd or generic detector")
 
 field = acts.ConstantBField(acts.Vector3(0.0, 0.0, 2.0 * u.T))
-rnd = acts.examples.RandomNumbers(seed=42)
+rnd = acts.examples.RandomNumbers(seed=42+event_set)
 
 s = acts.examples.Sequencer(events=nevents, numThreads=1, outputDir=str(outputDir))
 
@@ -53,7 +57,7 @@ addFatras(
     s,
     trackingGeometry,
     field,
-    ParticleSelectorConfig(eta=(-3.0, 3.0), pt=(150 * u.MeV, None), removeNeutral=True),
+    preSelectParticles=ParticleSelectorConfig(eta=(-3.0, 3.0), pt=(150 * u.MeV, None), removeNeutral=True),
     rnd=rnd,
     outputDirRoot=outputDir,
 #    outputDirCsv=outputDirCsv,
@@ -82,10 +86,28 @@ addCKFTracks(
     s,
     trackingGeometry,
     field,
-    CKFPerformanceConfig(ptMin=1.0 * u.GeV, nMeasurementsMin=6),
-    TrackSelectorRanges(pt=(1.0 * u.GeV, None), absEta=(None, 3.0), removeNeutral=True),
+    TrackSelectorConfig(
+        pt=(1.0 * u.GeV, None),
+        absEta=(None, 3.0),
+        loc0=(-4.0 * u.mm, 4.0 * u.mm),
+        nMeasurementsMin=6,
+    ),
+    CkfConfig(
+        chi2CutOff=chi2cut
+    ),
     outputDirRoot=outputDir,
+    writeCovMat=True
 #    outputDirCsv=outputDirCsv,
 )
+
+# addCKFTracks(
+#     s,
+#     trackingGeometry,
+#     field,
+#     CKFPerformanceConfig(ptMin=1.0 * u.GeV, nMeasurementsMin=6),
+#     TrackSelectorRanges(pt=(1.0 * u.GeV, None), absEta=(None, 3.0), removeNeutral=True),
+#     outputDirRoot=outputDir,
+# #    outputDirCsv=outputDirCsv,
+# )
 
 s.run()
