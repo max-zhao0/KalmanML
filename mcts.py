@@ -12,6 +12,15 @@ from train_evaluation.evaluation_model import *
 from triplet_generator import truth_seeds
 
 def wrong_way(intersection, track, geometry):
+    """
+    Detects whether intersection shares a layer with any of the current track hits
+    ---
+    intersection : float(3)    : next helix intersection, cartesian coordinates.
+    track        : float(n,13) : current track
+    geometry     : Geometry    : detector geometry object
+    ---
+    wrong_way    : bool        : Whether or not intersection is in the wrong direction
+    """
     wrong_way = False
     if intersection is not None:
         inter_vol, inter_lay, _ = geometry.nearest_layer(intersection)
@@ -22,6 +31,9 @@ def wrong_way(intersection, track, geometry):
     return wrong_way
 
 class Policy:
+    # Template for policy
+    # You don't have to use a Dense NN policy like implemented below.
+    
     def __init__(self):
         pass
 
@@ -29,12 +41,25 @@ class Policy:
         return None
 
 class Policy_nn(Policy):
+    # Keras model object
     model = None
 
     def __init__(self, tfnn_path):
+        """
+        tfnn_path : string : path to keras model
+        """
         self.model = tf.keras.models.load_model(tfnn_path)
         
     def __call__(self, track, candidates, intersection):
+        """
+        Find the unnormalized probabilities of each of the candidate hits
+        ---
+        track        : float(n,13) : Current track candidate
+        candidates   : float(m,13) : All candidate hits on the next layer
+        intersection : float(3)    : cartesian intersection point of the propagating helix
+        ---
+        probs        : float(m)    : Unnormalized probabilities
+        """
         track = np.array(track)[:,10:13]
         try:
             candidates = candidates[:,10:13]
@@ -56,17 +81,29 @@ class Edge:
     prev_node = None
     next_node = None
 
+    # List of all scores from every playout
     scores = None
+    # Prior value of this edge assigned by policy
     prior = None
 
     def __init__(self, prior):
+        """
+        prior : float : Prior value of this edge
+        """
         self.prior = prior
         self.scores = []
 
     def get_action(self):
+        """
+        Action value of this edge, defined to be the mean of all playout scores that passed through it.
+        """
         return np.mean(self.scores) if self.scores else 0
 
     def get_sim(self, bonus_value=1):
+        """
+        Simulation value of the edge, defined to be the action value plus a contribution from the prior and how many times it's been visited.
+        The latter encourages exploring more edges.
+        """
         action = self.get_action()
         if action:
             return action + bonus_value * self.prior / (1 + len(self.scores))
@@ -75,16 +112,30 @@ class Edge:
 class Node:
     prev_edge = None
     next_edges = None
+
+    # Possibly incomplete track candidate that has not been played out yet
     track = None # list
+    # Whether or not it's a complete track
     is_terminal = None
 
     def __init__(self, prev_edge, track):
+        """
+        prev_edge : Previous edge 
+        track     : Partial track candidate
+        """
         self.prev_edge = prev_edge
         self.track = track
         self.next_edges = []
         self.is_terminal = False
 
     def open_new(self, hit, prior):
+        """
+        Open a new node with given prior probability
+        ---
+        hit   : float(13) : prior
+        prior : float     : Prior probability as assigned by policy
+        ---
+        """
         new_edge = Edge(prior)
         new_edge.prev_node = self
         new_edge.next_node = Node(new_edge, self.track.copy())
@@ -94,13 +145,22 @@ class Node:
         return new_edge.next_node
 
 class EvalOutput:
+    # Object that is given by evaluation and updates edges
     def __init__(self, raw_output):
         self.raw_output = raw_output.detach().numpy()[:,0]
 
     def quality(self):
+        """
+        Return the total quality of the final track approximated here as the mean of the scores for each edge
+        """
         return np.mean(self.raw_output)
 
     def update(self, edges):
+        """
+        Update all the visited edges
+        ---
+        edges : Edge(n) : list of visited edges
+        """
         relevant = self.raw_output[3:3+len(edges)]
         for i, edge in enumerate(edges):
             edge.scores.append(relevant[i])
@@ -109,6 +169,12 @@ class Evaluation:
     MAX_LEN = 30
 
     def __init__(self, checkpoint_path, geometry):
+        """
+        Load model from torch checkpoint_path
+        ---
+        checkpoint_path : string   : path to torch mdoel
+        geometry        : Geometry : geometry object
+        """
         self.geometry = geometry
         device = th.device('cpu')
         self.model = EvalNN(7,128,2,1,False,0.1,30).double().to(device)
@@ -120,6 +186,13 @@ class Evaluation:
         # print("Loading previous model. Starting from epoch {}.".format(start_epoch), flush=True)
 
     def __call__(self, track):
+        """
+        Evaluate completed track candidate
+        ---
+        track       : float(n,13) : Completed track after playout
+        ---
+        eval_output : EvalOutput  : eval outut object that can update edges
+        """
         track = np.array(track)
         volumes = np.empty(track.shape[0])
         for i, hit in enumerate(track):
@@ -139,6 +212,13 @@ class Tree:
         self.root = Node(None, list(seed))
 
     def traverse(self):
+        """
+        Follow the tree by highest simulation value down to a leaf
+        ---
+        ---
+        curr_node     : Node    : Leaf node after traversal
+        visited_edges : Edge(n) : List of edges traversed in the process
+        """
         curr_node = self.root
         visited_edges = []
 
@@ -150,10 +230,20 @@ class Tree:
         return curr_node, visited_edges
 
 class SingleTracker:
+    # Tracker object for a single seed.
+    
     HELIX_STEPSIZE = 5
     SEARCH_RADIUS = 30
 
     def __init__(self, seed, geometry, locator, policy, evaluation, rnd=None):
+        """
+        seed           : float(3,13)         : Seed on the inner layers from which to track
+        geometry       : Geometry            : Geometry object
+        locator        : HitLocator          : Hit locator object
+        policy         : Policy              : policy network
+        evaluation     : Evaluation          : evaluation network
+        rnd            : np.random.Generator : random number generator to be used
+        """
         self.tree = Tree(seed)
         self.geometry = geometry
         self.locator = locator
@@ -162,6 +252,13 @@ class SingleTracker:
         self.rnd = rnd if rnd is not None else np.random.default_rng(seed=42)
 
     def playout(self, stub):
+        """
+        Playout an incomplete track candidate
+        ---
+        stub       : float(n,13) : incomplete track
+        ---
+        curr_track : float(m,13) : played out track
+        """
         incomplete = True
         curr_track = stub.copy()
         while incomplete:
@@ -198,11 +295,6 @@ class SingleTracker:
                             print(inter_vol, inter_lay)
                             print(self.geometry.nearest_layer(elem[10:13]))
                             assert False
-                    # for elem in curr_track:
-                    #     elem_vol, elem_lay, _ = self.geometry.nearest_layer(elem[10:13])
-                    #     if elem_vol == inter_vol and inter_lay == elem_lay:
-                    #         print("BRUH")
-                    #         assert False
                     curr_track.append(next_hits[choice])
 
         if len(curr_track) > 25:
@@ -212,6 +304,11 @@ class SingleTracker:
         return curr_track
 
     def open_node(self, node):
+        """
+        Open the specified node, adding all plausible following hits
+        ---
+        node : Node : Node to be opened
+        """
         try:
             next_hits, intersection = helices.get_next_hits(
                 np.array(node.track)[-3:,10:13],
@@ -232,6 +329,13 @@ class SingleTracker:
                 node.open_new(hit, priors[i])
 
     def step(self):
+        """
+        Performs one MCTS step
+        ---
+        ---
+        playaout_track : float(n,13) : Track from the random playout
+        quality        : float       : Quality of said track
+        """
         leaf, visited_edges = self.tree.traverse()
         if not leaf.is_terminal:
             self.open_node(leaf)
@@ -246,10 +350,26 @@ class SingleTracker:
 
 class EventTracker:
     def __init__(self, geometry, locator, policy, evaluation, rnd=None):
+        """
+        geometry       : Geometry            : Geometry object
+        locator        : HitLocator          : Hit locator object
+        policy         : Policy              : policy network
+        evaluation     : Evaluation          : evaluation network
+        rnd            : np.random.Generator : random number generator to be used
+        """
         self.st_args = [geometry, locator, policy, evaluation]
         self.rnd = rnd if rnd is not None else np.random.default_rng(seed=42)
 
     def __call__(self, seeds, niterations, threshold, outpath=None):
+        """
+        Perform track reconstruction with the specified seeds
+        ---
+        niterations : int(n)        : iteration numbers at which to save the current bag of tracks
+        threshold   : float         : quality threshold to save a track
+        outpath     : string        : path to save tracks while running
+        ---
+        track_sets  : float(n,m,k,13) : List of lists of tracks, each corresponding to one in niterations.
+        """
         # debug_target = 1210
         # seeds = seeds[debug_target:debug_target+1]
 
