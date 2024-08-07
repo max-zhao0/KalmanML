@@ -9,12 +9,8 @@ Max Zhao (UC Berkeley) \<zhaomax2@gmail.com\>
 
 ## Full Sequence
 
-### 0. ACTS
-
-This project is designed to use data generated with [ACTS](https://acts.readthedocs.io/en/latest/). ACTS needs to be installed or data should be created in the same format as those generated from scripts provided here.
-
 ### 1. Generate a dataset
 
-Modify `generate_pp.py`, putting your own ACTS installation in `actsdir` and the desired output directory where you want the datafiles to go in `datadir`.
+This project is designed to use data generated with [ACTS](https://acts.readthedocs.io/en/latest/). ACTS needs to be installed. Alternatively, you can skip this step and the following one and generate data with a method of your choosing in the same format. Modify `generate_pp.py`, putting your own ACTS installation in `actsdir` and the desired output directory where you want the datafiles to go in `datadir`.
 
 ## Appendix
