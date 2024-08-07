@@ -46,6 +46,8 @@ def get_zero_weight(file, radius):
     return nmatches / ntriplets
 
 def main(argv):
+    # BEGIN INPUT
+    
     inpath = "/pscratch/sd/m/max_zhao/policy/quadruplets_intersections.hdf5"
     metrics_path = "/global/homes/m/max_zhao/bin/policy_winter_metrics.csv"
     model_path = "/global/homes/m/max_zhao/mlkf/trackml/models/inter_policy/"
@@ -58,12 +60,14 @@ def main(argv):
     nepochs = 50
     input_size = 15
     nevents = 100
+
+    # END INPUT
     
     print("Devices:", tf.config.list_physical_devices('GPU'))
 
     infile = h5py.File(inpath, "r")
 
-    zero_weight = 0.5 * get_zero_weight(infile, train_radius)
+    zero_weight = get_zero_weight(infile, train_radius)
     print("Ratio of true to false labels:", zero_weight)
     class_weight = {0: zero_weight, 1: 1-zero_weight}
 
