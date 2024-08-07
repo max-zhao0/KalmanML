@@ -1,3 +1,5 @@
+# DEPRECATED
+
 import tensorflow as tf
 import numpy as np
 import utils
@@ -8,8 +10,11 @@ import sys
 import h5py
 
 class PolicyTracker:
+    # step size of the helix stepper in mm
     HELIX_STEPSIZE = 5
+    # search radius around helix intersection to look for plausible next hits
     HELIX_RADIUS = 30
+    # maximum length of a track
     MAX_DEPTH = 30
 
     geometry = None
@@ -18,6 +23,12 @@ class PolicyTracker:
     threshold = None
 
     def __init__(self, geometry, locator, policy, threshold):
+        """
+        geometry  : utils.Geometry   : geometry object for the detector
+        locator   : utils.HitLocator : hit locator object that stores the hits
+        policy    : mcts.Policy      : callable policy object
+        threshold : float            : threshold of policy output with which to accept hits
+        """
         self.geometry = geometry
         self.locator = locator
         self.policy = policy
@@ -31,7 +42,7 @@ class PolicyTracker:
         if next_hits is None or next_hits.shape[0] == 0 or depth > self.MAX_DEPTH:
             return [track]
 
-        hit_probs = self.policy.apply(track, next_hits)
+        hit_probs = self.policy(track, next_hits)
         good_hits = next_hits[np.array(hit_probs >= self.threshold)]
         if good_hits.shape[0] == 0:
             return [track]
