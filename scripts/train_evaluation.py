@@ -21,10 +21,7 @@ def main(argv):
     freeze_transformer = False
 
     cartesian = False
-
-    # Run 3: big model (all 0.03)
-    # Run 10: 100 events, chi2 = 15, 50 epochs, 2 Transformer layer
-    # Run 11: 100 events, chi2 = 15, 50 epochs, 1 Transformer layer
+    
     runnumber = 10
     nepochs = 50
     batch_size = 512
