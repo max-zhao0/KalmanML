@@ -6,9 +6,12 @@ import time
 import matplotlib.pyplot as plt
 
 def main(argv):
-    event_set = int(argv[1])
-    indir = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/500ev_chi15/event_set{}/ttbar200_100/".format(event_set)
+    # BEGIN INPUT
+    
+    indir = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/500ev_chi15/event_set/ttbar200_100/"
     detector_path = "/global/homes/m/max_zhao/mlkf/trackml/data/detectors.csv"
+
+    # END INPUT
 
     hits_path = indir + "processed/hits.hdf5"
     measurements_path = indir + "processed/measurements.hdf5"
