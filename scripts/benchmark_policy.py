@@ -4,11 +4,15 @@ import matplotlib.pyplot as plt
 import h5py
 
 def main(argv):
+    # BEGIN INPUT
+    
     metrics_path = "/global/homes/m/max_zhao/bin/policy_winter_metrics.csv"
     quadruplets_path = "/pscratch/sd/m/max_zhao/policy/quadruplets_intersections.hdf5"
     # intersections_path = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/ttbar200_100/processed/intersections.hdf5"
     test_events = range(80, 100)
     max_radius = 50
+
+    # END INPUT
 
     quadruplets_file = h5py.File(quadruplets_path, "r")
     #intersections_file = h5py.File(intersections_path, "r")
