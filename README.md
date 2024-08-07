@@ -4,8 +4,6 @@
 
 This repository contains an implementation of a novel track reconstruction algorithm based on the [Monte Carlo tree search](https://en.wikipedia.org/wiki/Monte_Carlo_tree_search) for the [TrackML detector](https://www.kaggle.com/competitions/trackml-particle-identification). Every script will have a block of code marked by `# BEGIN INPUT` and `# END INPUT`, which delineate the parts you need to modify, typically paths and parameters.
 
-### Authors
-
 Johannes Wagner (UC Berkeley) \<johannes_wagner@berkeley.edu\>  
 Max Zhao (UC Berkeley) \<zhaomax2@gmail.com\>
 
