@@ -9,10 +9,14 @@ import utils
 warnings.filterwarnings("error", category=RuntimeWarning)
 
 def main(argv):
+    # BEGIN INPUT
+    
     inpath = "/pscratch/sd/m/max_zhao/policy/quadruplets.hdf5"
     outpath = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/ttbar200_100/processed/intersections.hdf5"
     detector_path = "/global/homes/m/max_zhao/mlkf/trackml/data/detectors.csv"
     ignore_path = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/ttbar200_100/processed/intersection_breaks.csv"
+
+    # END INPUT
 
     infile = h5py.File(inpath, "r")
     outfile = h5py.File(outpath, "w")
