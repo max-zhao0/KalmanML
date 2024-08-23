@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--acts_dir', type=str, help = 'Path containing build of ACTS')
 parser.add_argument('--out_dir', type=str, help = 'Path to store generated data')
 parser.add_argument('--n_events', type=int, help = 'Number of events to generate')
-parser.add_argument('--n_muons', type=int, default=6000, help = 'Number of muons per event')
+parser.add_argument('--n_muons', type=int, default=50, help = 'Number of muons per event')
 parser.add_argument('--detector_type', type=str, default="odd", choices=['generic', 'odd'], help = 'ACTS detector model to use (odd or generic)')
 parser.add_argument('--rnd_seed', type=int, default=42, help = 'Random seed for data generation')
 parser.add_argument('--chi2_cut', type=float, default=15, help = 'Chi2 cut for track fitting')
@@ -21,7 +21,7 @@ parser.add_argument('--eta_range', nargs=2, type=float, default=[-3.0, 3.0], hel
 args = parser.parse_args()
 
 u = acts.UnitConstants
-outputDir = args.out_dir+"muon"+str(args.n_pileup)+"_"+str(args.n_events)+"/"
+outputDir = args.out_dir+"/muon"+str(args.n_muons)+"_"+str(args.n_events)+"/"
 if not os.path.exists(outputDir): os.mkdir(outputDir)
 
 if args.detector_type == "generic":
@@ -29,11 +29,11 @@ if args.detector_type == "generic":
     SeedingSel = args.acts_dir+"/Examples/Algorithms/TrackFinding/share/geoSelection-genericDetector.json"
     detector, trackingGeometry, decorators = acts.examples.GenericDetector.create()
 elif args.detector_type == "odd":
-    geoDir = args.acts_dir+"thirdparty/OpenDataDetector/"
+    geoDir = args.acts_dir+"/thirdparty/OpenDataDetector/"
     seedFilterModel = args.acts_dir+"/Examples/scripts/python/MLAmbiguityResolution/seedDuplicateClassifier.onnx"
-    MaterialMap = geoDir+"data/odd-material-maps.root"
-    DigiConfig = geoDir+"config/odd-digi-smearing-config.json"
-    SeedingSel = geoDir+"config/odd-seeding-config.json"
+    MaterialMap = geoDir+"/data/odd-material-maps.root"
+    DigiConfig = geoDir+"/config/odd-digi-smearing-config.json"
+    SeedingSel = geoDir+"/config/odd-seeding-config.json"
     MaterialDeco = acts.IMaterialDecorator.fromFile(Path(MaterialMap))
     detector, trackingGeometry, decorators = getOpenDataDetector(odd_dir=Path(geoDir), mdecorator=MaterialDeco)
 else:
@@ -42,7 +42,7 @@ else:
 field = acts.ConstantBField(acts.Vector3(0.0, 0.0, 2.0 * u.T))
 rnd = acts.examples.RandomNumbers(seed=args.rnd_seed)
 
-s = acts.examples.Sequencer(events=args.n_events, numThreads=-1, outputDir=str(outputDir))
+s = acts.examples.Sequencer(events=args.n_events, numThreads=-1, outputDir=str(outputDir), trackFpes=False)
 
 addParticleGun(
     s,
@@ -108,7 +108,7 @@ addCKFTracks(
         maxOutliers=2,
     ),
     CkfConfig(
-        chi2CutOff=args.chi2cut,
+        chi2CutOff=args.chi2_cut,
         numMeasurementsCutOff=10,
         seedDeduplication=True,
         stayOnSeed=True,
@@ -118,7 +118,7 @@ addCKFTracks(
         maxStripHoles=2,
     ),
     outputDirRoot=outputDir,
-    writeCovMat=True
+    #writeCovMat=True
 )
 
 s.run()

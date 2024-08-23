@@ -20,7 +20,7 @@ parser.add_argument('--chi2_cut', type=float, default=15, help = 'Chi2 cut for t
 args = parser.parse_args()
 
 u = acts.UnitConstants
-outputDir = args.out_dir+"ttbar"+str(args.n_pileup)+"_"+str(args.n_events)+"/"
+outputDir = args.out_dir+"/ttbar"+str(args.n_pileup)+"_"+str(args.n_events)+"/"
 if not os.path.exists(outputDir): os.mkdir(outputDir)
 
 if args.detector_type == "generic":
@@ -41,7 +41,7 @@ else:
 field = acts.ConstantBField(acts.Vector3(0.0, 0.0, 2.0 * u.T))
 rnd = acts.examples.RandomNumbers(seed=args.rnd_seed)
 
-s = acts.examples.Sequencer(events=args.n_events, numThreads=-1, outputDir=str(outputDir))
+s = acts.examples.Sequencer(events=args.n_events, numThreads=-1, outputDir=str(outputDir), trackFpes=False)
 
 addPythia8(
     s,
