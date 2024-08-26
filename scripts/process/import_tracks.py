@@ -9,8 +9,6 @@ def main(argv):
     gROOT.SetBatch(True)
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--in_dir', type=str, help = 'Path containing data generated with ACTS (with trackstates_ckf.root file)')
-    parser.add_argument('--out_dir', type=str, help = 'Path to store processed data')
     parser.add_argument('--hit_bounds', nargs=2, type=int, default=[3, 30], help = 'Bounds for number of hits in track')
     args = parser.parse_args()
 

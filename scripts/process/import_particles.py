@@ -15,6 +15,9 @@ def main(argv):
     
     infile = TFile(args.in_dir + "/particles_initial.root")
     part_tree = infile.Get("particles")
+
+    if not os.path.exists(args.out_dir):
+        os.mkdir(args.out_dir)
     outfile = h5py.File(args.out_dir + "particles.hdf5", "w")
 
     for event_id, event_particles in enumerate(part_tree):

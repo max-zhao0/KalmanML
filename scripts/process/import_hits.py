@@ -20,6 +20,8 @@ def main(argv):
     hits_tree = hits_file["hits"]
     measurements_file = uproot.open(args.in_dir+"measurements.root")
 
+    if not os.path.exists(args.out_dir):
+        os.mkdir(args.out_dir)
     outfile = h5py.File(args.out_dir+"hits.hdf5","w")
 
     nvar = 12 #number of stored variables for each hit (includes event, volume, layer and module number)
