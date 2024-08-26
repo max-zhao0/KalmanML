@@ -21,7 +21,7 @@ parser.add_argument('--eta_range', nargs=2, type=float, default=[-3.0, 3.0], hel
 args = parser.parse_args()
 
 u = acts.UnitConstants
-outputDir = args.out_dir+"/muon"+str(args.n_muons)+"_"+str(args.n_events)+"/"
+outputDir = args.out_dir+"/muon_"+str(args.n_muons)+"p_"+str(args.n_events)+"e/"
 if not os.path.exists(outputDir): os.mkdir(outputDir)
 
 if args.detector_type == "generic":

@@ -13,14 +13,14 @@ parser.add_argument('--acts_dir', type=str, help = 'Path containing build of ACT
 parser.add_argument('--out_dir', type=str, help = 'Path to store generated data')
 parser.add_argument('--n_events', type=int, help = 'Number of events to generate')
 parser.add_argument('--cms_energy', type=int, default=14, help = 'CoM energy in TeV (default is 14)')
-parser.add_argument('--n_pileup', type=int, default=200, help = 'Number of pileup events')
+parser.add_argument('--n_pileup', type=int, default=50, help = 'Number of pileup events')
 parser.add_argument('--detector_type', type=str, default="odd", choices=['generic', 'odd'], help = 'ACTS detector model to use (odd or generic)')
 parser.add_argument('--rnd_seed', type=int, default=42, help = 'Random seed for data generation')
 parser.add_argument('--chi2_cut', type=float, default=15, help = 'Chi2 cut for track fitting')
 args = parser.parse_args()
 
 u = acts.UnitConstants
-outputDir = args.out_dir+"/ttbar"+str(args.n_pileup)+"_"+str(args.n_events)+"/"
+outputDir = args.out_dir+"/ttbar_"+str(args.n_pileup)+"p_"+str(args.n_events)+"e/"
 if not os.path.exists(outputDir): os.mkdir(outputDir)
 
 if args.detector_type == "generic":
