@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 
-import sys, h5py, argparse
-from ROOT import gROOT, TFile
+import os, sys, h5py, argparse
+from tqdm import tqdm
 import numpy as np
+from ROOT import gROOT, TFile
 
 
 def main(argv):
@@ -11,28 +12,33 @@ def main(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument('--in_dir', type=str, help = 'Path containing data generated with ACTS (with particles_initial.root file)')
     parser.add_argument('--out_dir', type=str, help = 'Path to store processed data')
+    parser.add_argument('-o', '--overwrite', action='store_true', help = 'Overwrite existing output file')
     args = parser.parse_args()
     
-    infile = TFile(args.in_dir + "/particles_initial.root")
-    part_tree = infile.Get("particles")
+    particles_file = TFile(args.in_dir+"particles_simulation.root")
 
     if not os.path.exists(args.out_dir):
         os.mkdir(args.out_dir)
-    outfile = h5py.File(args.out_dir + "particles.hdf5", "w")
+    if args.overwrite or not os.path.exists(args.out_dir+"particles.hdf5"):
+        outfile = h5py.File(args.out_dir+"particles.hdf5","w")
+    else:
+        raise FileExistsError("Output file particles.hdf5 already exists. Use -o to overwrite")
+    
+    particles_tree = particles_file.Get("particles")
 
-    for event_id, event_particles in enumerate(part_tree):
-        data = np.empty((len(event_particles.particle_id), 4))
-        data[:,0] = event_particles.particle_id
-        data[:,1] = event_particles.eta
-        data[:,2] = event_particles.phi
-        data[:,3] = event_particles.pt
+    particles_dtypes = np.dtype([('particle_id', '<i4'), ('eta', '<f4'), ('phi', '<f4'), ('pt', '<f4')])
+
+    for nevent, event_particles in enumerate(tqdm(particles_tree)):
+        nparticles = len(getattr(event_particles, "eta"))
+        particles_data = np.empty(nparticles, dtype=particles_dtypes)
+        for name in particles_dtypes.names:
+            particles_data[name] = getattr(event_particles, name)
         
-        group = outfile.create_group(str(event_id))
-        group.create_dataset("particles", data=data)
+        group = outfile.create_group(str(nevent))
+        group.create_dataset("particles", data=particles_data)
 
     outfile.close()
 
-    return 0
 
 if __name__ == "__main__":
-    print("\nFinished with exit code:", main(sys.argv))
+    main(sys.argv)
