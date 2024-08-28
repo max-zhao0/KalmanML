@@ -16,9 +16,6 @@ def main(argv):
     parser.add_argument('-o', '--overwrite', action='store_true', help = 'Overwrite existing output file')
     args = parser.parse_args()
 
-    hits_file = uproot.open(args.in_dir+"hits.root")
-    meas_file = uproot.open(args.in_dir+"measurements.root")
-
     if not os.path.exists(args.out_dir):
         os.mkdir(args.out_dir)
     if args.overwrite or not os.path.exists(args.out_dir+"hits.hdf5"):
@@ -26,6 +23,8 @@ def main(argv):
     else:
         raise FileExistsError("Output file hits.hdf5 already exists. Use -o to overwrite")
 
+    hits_file = uproot.open(args.in_dir+"hits.root")
+    meas_file = uproot.open(args.in_dir+"measurements.root")
     hits_tree = hits_file["hits"]
     meas_tree = meas_file["measurements"]
 

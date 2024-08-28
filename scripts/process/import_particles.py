@@ -15,8 +15,6 @@ def main(argv):
     parser.add_argument('-o', '--overwrite', action='store_true', help = 'Overwrite existing output file')
     args = parser.parse_args()
     
-    particles_file = TFile(args.in_dir+"particles_simulation.root")
-
     if not os.path.exists(args.out_dir):
         os.mkdir(args.out_dir)
     if args.overwrite or not os.path.exists(args.out_dir+"particles.hdf5"):
@@ -24,11 +22,14 @@ def main(argv):
     else:
         raise FileExistsError("Output file particles.hdf5 already exists. Use -o to overwrite")
     
+    particles_file = TFile(args.in_dir+"particles_simulation.root")
     particles_tree = particles_file.Get("particles")
+
+    nevents = particles_tree.GetEntries()
 
     particles_dtypes = np.dtype([('particle_id', '<i4'), ('eta', '<f4'), ('phi', '<f4'), ('pt', '<f4')])
 
-    for nevent, event_particles in enumerate(tqdm(particles_tree)):
+    for nevent, event_particles in enumerate(tqdm(particles_tree, total=nevents)):
         nparticles = len(getattr(event_particles, "eta"))
         particles_data = np.empty(nparticles, dtype=particles_dtypes)
         for name in particles_dtypes.names:
