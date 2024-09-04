@@ -50,15 +50,6 @@ def main(argv):
     for name in hits_dtypes.names:
         hits_data[name] = hits_tree[name].array(library="np")
 
-    #sort data based on event, volume, layer and module number (to match truth particles)
-    meas_data = meas_data[meas_data["surface_id"].argsort(kind='mergesort')] #sort by module
-    meas_data = meas_data[meas_data["layer_id"].argsort(kind='mergesort')] #sort by layer
-    meas_data = meas_data[meas_data["volume_id"].argsort(kind='mergesort')] #sort by volume
-    meas_data = meas_data[meas_data["event_nr"].argsort(kind='mergesort')] #sort by event
-    
-    #sort data based on event number
-    hits_data = hits_data[hits_data["event_id"].argsort(kind="mergesort")] #sort by event
-
     print("Processing hit information")
 
     curr_event = -1
@@ -66,11 +57,11 @@ def main(argv):
         if curr_event != meas_data["event_nr"][i]:
             curr_event = meas_data["event_nr"][i]
             event_truth = hits_data[meas_data["event_nr"][i] == hits_data["event_id"]]
-        match_index = np.argwhere(np.logical_and.reduce(
-            [meas_data["true_x"][i] == event_truth["tx"],
-            meas_data["true_y"][i] == event_truth["ty"]]
-        ))[0]
-        meas_data["particle_id"][i] = hits_data["particle_id"][match_index]
+        match_index = np.argwhere(np.logical_and.reduce([
+            meas_data["true_x"][i] == event_truth["tx"],
+            meas_data["true_y"][i] == event_truth["ty"]
+        ]))[0]
+        meas_data["particle_id"][i] = event_truth["particle_id"][match_index]
 
     print("Restructuring and writing hits to file")
 
