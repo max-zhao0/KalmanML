@@ -151,15 +151,15 @@ def generate_triplets(hits_path, detector_path, event_id, radius, histograms):
     return triplets, labels, finding_stats
   
 def main(argv):
-    event_set = int(argv[1])
-    print("Event set:", event_set)
+    # BEGIN INPUT
 
-    # hits_path = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/muons6000_100/processed/measurements.hdf5"
-    hits_path = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/500ev_chi15/event_set{}/ttbar200_100/processed/measurements.hdf5".format(event_set)
+    hits_path = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/500ev_chi15/event_set{}/ttbar200_100/processed/measurements.hdf5".format(0)
     detector_path = "/global/homes/m/max_zhao/mlkf/trackml/data/detectors.csv"
-    outdir = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/500ev_chi15/event_set{}/ttbar200_100/processed/".format(event_set)
+    outdir = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/500ev_chi15/event_set{}/ttbar200_100/processed/".format(0)
     events = range(100)
     search_radii = [40]
+
+    # END INPUT
 
     outfile = h5py.File(outdir + "quadruplets.hdf5", "w")
 
@@ -179,12 +179,6 @@ def main(argv):
 
         np.savetxt(outdir + "histograms.csv", np.array(histograms), delimiter=",")
 
-    #finding_stats = np.array(finding_stats)
-    #print("Total finding rate:", np.sum(finding_stats[:,-1]) / finding_stats.shape[0])
-
-    #np.savetxt(outdir + "finding_stats_testing.csv", finding_stats, delimiter=",")
-    #np.savetxt(outdir + "triplets.csv", triplets_flat, delimiter=",")
-    #np.savetxt(outdir + "labels.csv", labels, delimiter=",")
     outfile.close()
     return 0
   
