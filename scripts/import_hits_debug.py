@@ -6,34 +6,38 @@ import awkward as ak
 from ROOT import gROOT, TFile, TH1D, TLorentzVector, TCanvas, TTree, gDirectory, TChain, TH2D
 import uproot
 import time
+import matplotlib.pyplot as plt
+
+
+def plot_score(true, meas, bins, xlabel, outname):
+    plot_bins = bins[:-1]+0.5
+    plt.figure()
+    plt.grid()
+    plt.yscale("log")
+    plt.xlim(plot_bins[0]-1,plot_bins[-1]+1)
+    plt.step(plot_bins,true,where='mid',label="true",color="blue",alpha=0.7)
+    plt.step(plot_bins,meas,where='mid',label="meas",color="red",alpha=0.7)
+    plt.xlabel(xlabel)
+    plt.legend()
+    plt.savefig(outname)
+
 
 def main(argv):
     gROOT.SetBatch(True)
-    
-    # BEGIN INPUT
 
     nvar = 12 #number of stored variables for each hit (includes event, volume, layer and module number)
 
-    indir = "/global/cfs/cdirs/atlas/max_zhao/mlkf/trackml/test_events/eval_test/ttbar200_5/"
-    outdir = indir+"processed/"
-
-    # END INPUT
-
-    if not os.path.exists(outdir): os.mkdir(outdir)
+    indir = "/global/cfs/cdirs/atlas/jmw464/mlkf_data/ttbar200_100/"
+    outdir = "/global/cfs/cdirs/atlas/jmw464/mlkf_data/data/processed/"
 
     hits_file = uproot.open(indir+"hits.root")
     hits_tree = hits_file["hits"]
     measurements_file = uproot.open(indir+"measurements.root")
 
-    outfile = h5py.File(outdir+"hits.hdf5","w")
+    outfile = h5py.File(outdir+"trash.hdf5","w")
 
     data = np.zeros((0,nvar))
     keylist = measurements_file.keys()
-    
-    for i, key in enumerate(keylist):
-        keylist[i] = key.split(";")[0]
-    keylist = list(set(keylist))
-    keylist.sort()
 
     start_time = time.time()
     print("Beginning data processing")
@@ -62,7 +66,7 @@ def main(argv):
 
         data = np.append(data,layer_data,axis=0)
 
-        print("Processed key {} with {} hits in {} seconds".format(key, layer_tree.num_entries, time.time()-cur_time))
+        print("Processed key {} in {} seconds".format(key, time.time()-cur_time))
 
     #sort data for each volume based on event, volume, layer and module number (to match truth particles)
     data = data[data[:,3].argsort(kind='mergesort')] #sort by module
@@ -83,23 +87,59 @@ def main(argv):
     truth_data[:,6] = hits_tree["sensitive_id"].array(library="np")
     truth_data[:,7] = hits_tree["particle_id"].array(library="np")
     truth_data = truth_data[truth_data[:,0].argsort(kind="mergesort")] #sort by event
+   
+    event_bins = np.arange(-1.5,52.5,1)
+    meas_events = np.histogram(data[:,0], bins=event_bins)[0]
+    true_events = np.histogram(truth_data[:,0], bins=event_bins)[0]
 
-    start_time = time.time()
-    curr_event = -1
-    for i in range(data.shape[0]):
-        if i % 10000 == 0:
-            duration = time.time() - start_time
-            eta = (1/3600) * duration * data.shape[0] / (i + 1)
-            sys.stdout.write("\rElapsed: {} Projected hours: {}".format(duration, eta))
-            sys.stdout.flush()
-        if curr_event != data[i,0]:
-            curr_event = data[i,0]
-            event_truth = truth_data[data[i,0] == truth_data[:,0]]
-        match_index = np.argwhere(np.logical_and.reduce(
-            [data[i,8] == event_truth[:,1],
-            data[i,9] == event_truth[:,2]]
-        ))[0]
-        data[i,-1] = truth_data[match_index,-1]
+    volume_bins = np.arange(5.5,20.5,1)
+    meas_vol = np.histogram(data[:,1], bins=volume_bins)[0]
+    true_vol = np.histogram(truth_data[:,4], bins=volume_bins)[0]
+
+    layer_bins = np.arange(0.5,16.5,1)
+    meas_lay = np.histogram(data[:,2], bins=layer_bins)[0]
+    true_lay = np.histogram(truth_data[:,5], bins=layer_bins)[0]
+
+    module_bins = np.arange(-1.5,2002.5,1)
+    meas_mod = np.histogram(data[:,3], bins=module_bins)[0]
+    true_mod = np.histogram(truth_data[:,6], bins=module_bins)[0]
+
+    xyz_bins = np.arange(-1000,1000,40)
+    meas_x = np.histogram(data[:,8], bins=xyz_bins)[0]
+    true_x = np.histogram(truth_data[:,1], bins=xyz_bins)[0]
+    meas_y = np.histogram(data[:,9], bins=xyz_bins)[0]
+    true_y = np.histogram(truth_data[:,2], bins=xyz_bins)[0]
+    meas_z = np.histogram(data[:,10], bins=xyz_bins)[0]
+    true_z = np.histogram(truth_data[:,3], bins=xyz_bins)[0]
+
+    plot_score(true_events, meas_events, event_bins, "event", "/global/homes/j/jmw464/ATLAS/KalmanML/output/events.png")
+    plot_score(true_vol, meas_vol, volume_bins, "volume", "/global/homes/j/jmw464/ATLAS/KalmanML/output/volumes.png")
+    plot_score(true_lay, meas_lay, layer_bins, "layer", "/global/homes/j/jmw464/ATLAS/KalmanML/output/layers.png")
+    plot_score(true_mod, meas_mod, module_bins, "module", "/global/homes/j/jmw464/ATLAS/KalmanML/output/modules.png")
+    plot_score(true_x, meas_x, xyz_bins, "x", "/global/homes/j/jmw464/ATLAS/KalmanML/output/x.png")
+    plot_score(true_y, meas_y, xyz_bins, "y", "/global/homes/j/jmw464/ATLAS/KalmanML/output/y.png")
+    plot_score(true_z, meas_z, xyz_bins, "z", "/global/homes/j/jmw464/ATLAS/KalmanML/output/z.png")
+
+    ####
+    flag = 1
+    max_event = int(truth_data[-1,0])
+    for i in range(max_event+1):
+        hits_no = np.sum(truth_data[:,0] == i)
+        measurements_no = np.sum(data[:,0] == i)
+        print("Event {}: {} hits, {} measurements".format(i, hits_no, measurements_no))
+    #    if i == 1:
+    #        rel_truth = truth_data[truth_data[:,0] == i]
+    #        rel_meas = data[data[:,0] == i]
+    #        for j in range(rel_meas.shape[0]):
+    #            if flag and rel_truth[j,4] != rel_meas[j,1]:
+    #                print("AHA!")
+    #                flag = 0
+    #            print(rel_truth[j,4], rel_meas[j,1], rel_truth[j,5], rel_meas[j,2], rel_truth[j,6], rel_meas[j,3])
+    ####
+
+    match_array = np.logical_and(np.in1d(truth_data[:,1], data[:,8]), np.in1d(truth_data[:,2], data[:,9])) #match hits from hits file to hits from measurements file
+    truth_data = truth_data[match_array]
+    data[:,-1] = truth_data[:,-1]
 
     print("Writing file. Time elapsed: {} seconds".format(time.time()-start_time))
 
